@@ -7,6 +7,40 @@ https://differ-tech.pages.dev/portal/view/dcar-fast-motion-control
 
 本例程代码文件按 UTF-8 编码保存。
 
+## 2026 电赛 H/D 题固定赛道
+
+STM32 主工程现提供两套独立的胶囊形固定路线，均从 A 点顺时针运行一圈：
+
+- H 题：1.5 m 直线、0.50 m 半圆、1.5 m 直线、0.50 m 半圆；默认 0.34 m/s。
+- D 题：1.5 m 直线、0.741 m 半圆、1.5 m 直线、0.741 m 半圆；默认 0.25 m/s。
+
+路线使用连续速度指令，按局部里程投影结束直线、按累计航向结束半圆；四段之间
+不停车，只在完成一圈或发生里程失联/超时时停车。实现不读取光电、灰度或其他
+循线传感器。
+
+唯一调参入口：
+
+```text
+DFCom_Example/USER/nuedc_2026_routes.h
+```
+
+修改下面一个宏即可选择烧录后执行 H 或 D，默认 H：
+
+```c
+#define NUEDC_2026_ACTIVE_ROUTE NUEDC_2026_ROUTE_H
+```
+
+主程序完成通信握手后等待 3 秒，自动执行所选路线一次并停车；需要重跑时按开发
+板复位键。D 题半径按已确认的 741 mm 印刷地图设置；若使用官方 750 mm 场地，
+将 `NUEDC_2026_D_RADIUS_M` 改为 `0.750f`。
+
+路线主机仿真测试：
+
+```sh
+sh tests/host/run_nuedc_2026_routes_tests.sh
+sh tests/host/run_nuedc_2026_integration_checks.sh
+```
+
 ## 仓库内容
 
 ```text
