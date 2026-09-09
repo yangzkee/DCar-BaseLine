@@ -2,7 +2,8 @@ param(
     [ValidateSet('check', 'build', 'test', 'run')][string]$Action = 'check',
     [string]$Port = 'COM3',
     [ValidateSet('velpos', 'odom')][string]$Telemetry = 'velpos',
-    [switch]$EnableMotion
+    [switch]$EnableMotion,
+    [switch]$EnableActions
 )
 $ErrorActionPreference = 'Stop'
 $bridgeWorkspace = Split-Path $PSScriptRoot -Parent
@@ -19,7 +20,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Port enumeration failed' }
         }
         'build' {
-            colcon build --merge-install --base-paths dcaron_bridge --packages-select dcaron_bridge
+            colcon build --merge-install --base-paths . --packages-up-to dcaron_bridge
             if ($LASTEXITCODE -ne 0) { throw 'colcon build failed' }
         }
         'test' {
@@ -34,7 +35,8 @@ try {
             if (-not (Test-Path -LiteralPath 'install/local_setup.ps1')) { throw 'Build the package first' }
             . ./install/local_setup.ps1
             $motionValue = if ($EnableMotion) { 'true' } else { 'false' }
-            ros2 launch dcaron_bridge bridge.launch.py "port:=$Port" "telemetry:=$Telemetry" "enable_cmd_vel:=$motionValue"
+            $actionValue = if ($EnableActions) { 'true' } else { 'false' }
+            ros2 launch dcaron_bridge bridge.launch.py "port:=$Port" "telemetry:=$Telemetry" "enable_cmd_vel:=$motionValue" "enable_motion_actions:=$actionValue"
             if ($LASTEXITCODE -ne 0) { throw 'ROS node exited with an error' }
         }
     }

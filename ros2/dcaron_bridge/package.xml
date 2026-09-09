@@ -1,11 +1,12 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>dcaron_bridge</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>Lightweight DFLink V3 serial bridge for DcarON.</description>
   <maintainer email="220290149+yangzkee@users.noreply.github.com">yangzkee</maintainer>
   <license>Proprietary</license>
   <buildtool_depend>ament_python</buildtool_depend>
+  <depend>dcaron_interfaces</depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
@@ -13,6 +14,7 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>python3-serial</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

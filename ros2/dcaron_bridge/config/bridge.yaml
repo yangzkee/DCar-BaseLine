@@ -7,6 +7,11 @@
     telemetry: velpos  # velpos = standard; odom = Pro Odom v4 + IMU
     frequency: 10     # Allowed: 10, 50, 100, 200, 250, 500, 1000
     enable_cmd_vel: false
+    enable_motion_actions: false
+    motion_timeout: 30.0
+    max_motion_timeout: 120.0
+    max_displacement: 2.0  # m per action; for arcs this bounds path length
+    max_rotation: 6.283185307179586 # rad per action
     cmd_timeout: 0.5
     max_linear_speed: 0.5  # XY vector magnitude, m/s
     max_angular_speed: 1.0 # rad/s

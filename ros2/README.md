@@ -19,13 +19,14 @@
 | `/odom` | `nav_msgs/msg/Odometry` | 收到有效的新回包时发布；位置在 odom 系，速度在机体系 |
 | `/imu/data` | `sensor_msgs/msg/Imu` | 仅 `telemetry=odom` 时发布加速度和角速度 |
 | `/cmd_vel` | `geometry_msgs/msg/Twist` | 仅 `enable_cmd_vel=true` 时订阅，映射为 `A=0x02 B=0x62` |
+| `/motion` | `dcaron_interfaces/action/Motion` | 旋转、位移、平移并转向、圆弧、十字标，带进度/结果/取消 |
 | `/tf` | TF | 可选 `odom → base_link`，默认关闭 |
 
 - 默认 `telemetry=velpos`：标准 VelPos v2，35 字节；不虚构 IMU 数据。
 - `telemetry=odom`：Odom v4，51 字节，需要底盘当前档位/授权支持 Pro 全量回传。
 - SI：m、m/s、rad、rad/s。+X 前、+Y 左、+Z 上，Yaw 逆时针为正。
 - 原始串口订阅每次连接只发送一次；断线/数据超时会重连，丢弃旧命令。
-- 首版包含速度控制和遥测；有限距离运动、十字标等接口后续按需扩展。
+- 0.2 版补齐有终点运动与十字标；详见 [动作接口与轨迹示例](docs/motion.md)。
 
 ## Windows 原生安装与运行
 
@@ -50,10 +51,13 @@ python -c "import rclpy, serial; from nav_msgs.msg import Odometry; print('OK')"
 
 首次在两个激活后的终端分别运行官方 `demo_nodes_cpp talker` 和
 `demo_nodes_py listener`，确认 ROS 基础安装正常。
+0.2 版新增 `dcaron_interfaces` Action 定义，需要安装 **Visual Studio 2022 C++ Build Tools**
+或已有 VS 2022 的 C++ 工作负载。使用 x64 Native Tools 终端并激活 Pixi/ROS 后编译，
+`colcon` 会先生成接口，再构建 Python 驱动。运行时不要求启动 Visual Studio IDE。
 然后进入本仓库 `ros2` 目录：
 
 ```bat
-colcon build --merge-install --base-paths dcaron_bridge --packages-select dcaron_bridge
+colcon build --merge-install --base-paths . --packages-up-to dcaron_bridge
 call install\local_setup.bat
 python -m serial.tools.list_ports
 ros2 launch dcaron_bridge bridge.launch.py port:=COM5
@@ -87,7 +91,7 @@ powershell -NoProfile -File tools\windows.ps1 -Action run -Port COM5
 source /opt/ros/jazzy/setup.bash
 sudo apt install python3-serial python3-colcon-common-extensions python3-pytest
 cd DCar-BaseLine/ros2
-colcon build --merge-install --base-paths dcaron_bridge --packages-select dcaron_bridge
+colcon build --merge-install --base-paths . --packages-up-to dcaron_bridge
 source install/setup.bash
 ros2 launch dcaron_bridge bridge.launch.py port:=/dev/ttyUSB0
 ```
@@ -127,8 +131,8 @@ ros2 topic echo /imu/data --once
 ## 配置与数据约定
 
 配置见 `dcaron_bridge/config/bridge.yaml`。复制到自用配置文件后可传入
-`params_file:=绝对路径`。**launch 的 port、telemetry、enable_cmd_vel 始终覆盖 YAML
-同名值**（包括默认值）；这三个值从命令行指定，其余值从 YAML 读取。
+`params_file:=绝对路径`。**launch 的 port、telemetry、enable_cmd_vel、enable_motion_actions 始终覆盖 YAML
+同名值**（包括默认值）；这四个值从命令行指定，其余值从 YAML 读取。
 参数启动时读取且只读，修改后重启。
 
 - 消息使用收到有效帧时的主机 ROS 时间；MCU `Time_ms/us` 保留在协议解码结果中。
@@ -155,6 +159,7 @@ ros2 topic echo /imu/data --once
 ```text
 cd ros2/dcaron_bridge
 python -m unittest discover -s test -p test_protocol.py -v
+python -m unittest discover -s test -p test_motion.py -v
 ```
 
 `.github/workflows/ros2.yml` 配置了 Windows/Ubuntu 协议测试，以及 ROS 2 Jazzy

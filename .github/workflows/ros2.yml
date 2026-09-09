@@ -23,7 +23,9 @@ jobs:
           python-version: '3.12'
       - name: Protocol regression tests (no ROS installation)
         working-directory: ros2/dcaron_bridge
-        run: python -m unittest discover -s test -p test_protocol.py -v
+        run: |
+          python -m unittest discover -s test -p test_protocol.py -v
+          python -m unittest discover -s test -p test_motion.py -v
 
   ros-runtime:
     runs-on: ubuntu-latest
@@ -40,7 +42,7 @@ jobs:
         run: |
           source /opt/ros/jazzy/setup.bash
           python3 -c 'import rclpy, serial, pytest; from tf2_ros import TransformBroadcaster'
-          colcon build --merge-install --base-paths dcaron_bridge --packages-select dcaron_bridge
+          colcon build --merge-install --base-paths . --packages-up-to dcaron_bridge
           source install/setup.bash
           ros2 pkg executables dcaron_bridge
           ros2 launch dcaron_bridge bridge.launch.py --show-args

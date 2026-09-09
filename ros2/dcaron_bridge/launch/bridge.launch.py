@@ -16,6 +16,7 @@ def generate_launch_description():
         DeclareLaunchArgument("port", default_value="COM3"),
         DeclareLaunchArgument("telemetry", default_value="velpos"),
         DeclareLaunchArgument("enable_cmd_vel", default_value="false"),
+        DeclareLaunchArgument("enable_motion_actions", default_value="false"),
         Node(
             package="dcaron_bridge", executable="dcaron_bridge", name="dcaron_bridge",
             namespace=LaunchConfiguration("namespace"), output="screen",
@@ -23,6 +24,7 @@ def generate_launch_description():
                 "port": ParameterValue(LaunchConfiguration("port"), value_type=str),
                 "telemetry": ParameterValue(LaunchConfiguration("telemetry"), value_type=str),
                 "enable_cmd_vel": ParameterValue(LaunchConfiguration("enable_cmd_vel"), value_type=bool),
+                "enable_motion_actions": ParameterValue(LaunchConfiguration("enable_motion_actions"), value_type=bool),
             }],
         ),
     ])

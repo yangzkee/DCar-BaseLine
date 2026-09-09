@@ -30,13 +30,16 @@ class DcaronBridge(Node):
             "telemetry_timeout": 2.0, "reconnect_interval": 3.0,
             "odom_frame": "odom", "base_frame": "base_link", "imu_frame": "base_link",
             "publish_tf": False,
+            "enable_motion_actions": False, "motion_timeout": 30.0,
+            "max_motion_timeout": 120.0, "max_displacement": 2.0, "max_rotation": 6.283185307179586,
         }
         self.cfg = {key: self.declare_parameter(
             key, value, ParameterDescriptor(read_only=True)).value
             for key, value in defaults.items()}
         c = self.cfg
         for key in ("cmd_timeout", "max_linear_speed", "max_angular_speed",
-                    "telemetry_timeout", "reconnect_interval"):
+                    "telemetry_timeout", "reconnect_interval", "motion_timeout",
+                    "max_motion_timeout", "max_displacement", "max_rotation"):
             if not math.isfinite(c[key]) or c[key] <= 0:
                 raise ValueError(f"{key} must be positive and finite")
         for key in ("robot_id", "host_id"):
@@ -54,6 +57,7 @@ class DcaronBridge(Node):
         self.parser = Parser()
         self.watchdog = CommandWatchdog(c["cmd_timeout"])
         self.serial_factory = serial_factory or serial.Serial
+        self.serial_error = serial.SerialException
         self.port = None
         self.next_connect = 0.0
         self.last_rx = None
@@ -68,6 +72,12 @@ class DcaronBridge(Node):
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.VOLATILE)
         self.cmd_sub = self.create_subscription(Twist, "cmd_vel", self.on_command, qos) if c["enable_cmd_vel"] else None
+        self.actions = None
+        if c["motion_timeout"] > c["max_motion_timeout"]:
+            raise ValueError('motion_timeout must not exceed max_motion_timeout')
+        if c['enable_motion_actions']:
+            from .actions import MotionActions
+            self.actions = MotionActions(self)
         self.timer = self.create_timer(0.01, self.tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.get_logger().info(
             f"DFLink port={c['port']} baud={c['baudrate']} robot={c['robot_id']} "
@@ -84,6 +94,8 @@ class DcaronBridge(Node):
         self.watchdog.reset()
 
     def disconnect(self, error):
+        if self.actions is not None:
+            self.actions.interrupt(f'Serial/telemetry failure: {error}', send_stop=False)
         self.get_logger().error(f"DFLink port={self.cfg['port']} failed: {error}")
         if self.port is not None:
             try:
@@ -109,6 +121,8 @@ class DcaronBridge(Node):
                  and abs(values[2]) <= self.cfg["max_angular_speed"]
                  and msg.linear.z == 0.0 and msg.angular.x == 0.0 and msg.angular.y == 0.0)
         try:
+            if self.actions is not None:
+                self.actions.interrupt('Interrupted by cmd_vel', send_stop=False)
             if not valid:
                 self.stop()
                 if not self.invalid_reported:
@@ -134,15 +148,23 @@ class DcaronBridge(Node):
                 self.last_rx = None
                 self.connected_at = now
                 self.stale_reported = False
-                if self.cfg["enable_cmd_vel"]:
+                if self.cfg["enable_cmd_vel"] or self.cfg['enable_motion_actions']:
                     self.stop()
                 self.write(self.subscribe_frame)  # Exactly once per connection.
                 self.get_logger().info("Serial connected; DFLink subscription sent, waiting for telemetry")
             # Watchdog precedes RX processing; a noisy stream cannot starve it.
+            if self.actions is not None:
+                self.actions.tick()
+                if self.port is None:
+                    return
             if self.watchdog.expired(now):
                 self.stop()
                 self.get_logger().warning("cmd_vel timeout; sent zero velocity")
             for packet in self.parser.feed(self.port.read(min(self.port.in_waiting, 4096))):
+                if (packet.target, packet.source) == (self.cfg['host_id'], self.cfg['robot_id']):
+                    if packet.a == 0x6F and self.actions is not None:
+                        self.actions.receive(packet)
+                        continue
                 if (packet.target, packet.source, packet.a, packet.b) != (
                         self.cfg["host_id"], self.cfg["robot_id"], 0x6C,
                         STREAMS[self.cfg["telemetry"]]):
@@ -158,7 +180,7 @@ class DcaronBridge(Node):
                 self.publish_state(state)
             if now - (self.last_rx if self.last_rx is not None else self.connected_at) >= self.cfg["telemetry_timeout"]:
                 if not self.stale_reported:
-                    if self.cfg["enable_cmd_vel"]:
+                    if self.cfg["enable_cmd_vel"] or self.cfg['enable_motion_actions']:
                         self.stop()
                     self.get_logger().warning(
                         "No fresh telemetry: check wiring, stream version and license (Odom v4 requires Pro). "
@@ -210,9 +232,12 @@ class DcaronBridge(Node):
             self.tf.sendTransform(transform)
 
     def destroy_node(self):
+        if self.actions is not None:
+            self.actions.destroy()
+            self.actions = None
         if self.port is not None:
             try:
-                if self.cfg["enable_cmd_vel"]:
+                if self.cfg["enable_cmd_vel"] or self.cfg['enable_motion_actions']:
                     self.stop()
                 self.write(subscribe(self.cfg["telemetry"], self.cfg["frequency"], False,
                                      self.cfg["robot_id"], self.cfg["host_id"]))

@@ -189,3 +189,128 @@ class RosNodeTests(unittest.TestCase):
         self.assertEqual(Parser().feed(port.tx[-2])[0].payload, bytes(12))
         self.assertEqual(port.tx[-1], subscribe('velpos', continuous=False))
         self.assertTrue(port.closed)
+
+    def action_client(self):
+        from rclpy.node import Node
+        from rclpy.action import ActionClient
+        from dcaron_interfaces.action import Motion
+        peer = Node('test_motion_client', context=self.context)
+        self.nodes.append(peer)
+        self.executor.add_node(peer)
+        return ActionClient(peer, Motion, 'motion'), Motion
+
+    def send_action(self, client, request):
+        response = client.send_goal_async(request)
+        self.spin_until(response.done)
+        return response.result()
+
+    def test_actions_all_wire_commands_and_results(self):
+        node = self.make_bridge(enable_motion_actions=True)
+        port = self.ports[-1]
+        client, Motion = self.action_client()
+        try:
+            for command in (0x63, 0x64, 0x65, 0x66):
+                port.inject(velpos_packet())
+                node.tick()
+                goal = Motion.Goal()
+                goal.command, goal.x, goal.yaw = command, 0.1, 0.2
+                goal.speed, goal.angular_speed, goal.radius = 0.1, 0.2, 0.5
+                handle = self.send_action(client, goal)
+                self.assertTrue(handle.accepted)
+                self.spin_until(lambda: node.actions.active is not None and node.actions.active['sent'])
+                self.assertEqual(Parser().feed(port.tx[-1])[0].b, command)
+                result = handle.get_result_async()
+                port.rx.extend(frame(0x6F, command, b'\x80\x00', 151, 1))
+                node.tick()
+                self.assertFalse(result.done())
+                port.rx.extend(frame(0x6F, command, b'\xff\x00', 151, 1))
+                self.spin_until(result.done)
+                self.assertTrue(result.result().result.success)
+                self.assertEqual(result.result().status, 4)
+        finally:
+            client.destroy()
+
+    def test_action_cancel_old_reply_quarantine_and_rejection(self):
+        node = self.make_bridge(enable_motion_actions=True)
+        port = self.ports[-1]
+        port.inject(velpos_packet())
+        node.tick()
+        client, Motion = self.action_client()
+        try:
+            goal = Motion.Goal()
+            goal.command, goal.x, goal.speed = 0x64, 0.1, 0.1
+            handle = self.send_action(client, goal)
+            self.assertTrue(handle.accepted)
+            self.spin_until(lambda: node.actions.active is not None and node.actions.active['sent'])
+            busy = self.send_action(client, goal)
+            self.assertFalse(busy.accepted)
+            result = handle.get_result_async()
+            cancel = handle.cancel_goal_async()
+            self.spin_until(cancel.done)
+            self.spin_until(result.done)
+            self.assertEqual(result.result().status, 5)
+            self.assertEqual(Parser().feed(port.tx[-1])[0].payload, bytes(12))
+            old_pending = self.send_action(client, goal)
+            self.assertFalse(old_pending.accepted)
+            port.rx.extend(frame(0x6F, 0x64, b'\xff\x62', 151, 1))
+            node.tick()
+            next_handle = self.send_action(client, goal)
+            self.assertTrue(next_handle.accepted)
+            self.spin_until(lambda: node.actions.active is not None and node.actions.active['sent'])
+            result = next_handle.get_result_async()
+            port.rx.extend(frame(0x6F, 0x64, b'\xff\x01', 151, 1))
+            self.spin_until(result.done)
+            self.assertEqual(result.result().status, 6)
+            self.assertEqual(result.result().result.notice, 1)
+        finally:
+            client.destroy()
+
+    def test_action_deadline_and_reconnect_do_not_replay(self):
+        node = self.make_bridge(enable_motion_actions=True)
+        port = self.ports[-1]
+        port.inject(velpos_packet())
+        node.tick()
+        client, Motion = self.action_client()
+        try:
+            goal = Motion.Goal()
+            goal.command, goal.yaw, goal.angular_speed = 0x63, 0.2, 0.2
+            handle = self.send_action(client, goal)
+            self.spin_until(lambda: node.actions.active is not None and node.actions.active['sent'])
+            result = handle.get_result_async()
+            node.actions.active['deadline'] = time.monotonic() - 1
+            self.spin_until(result.done)
+            self.assertFalse(result.result().result.success)
+            self.assertEqual(result.result().result.notice, 254)
+            node.disconnect('test')
+            node.next_connect = 0
+            node.tick()
+            self.assertIn(0x63, node.actions.quarantine.pending)
+            self.assertEqual([p.b for data in self.ports[-1].tx for p in Parser().feed(data)], [0x62, 0x81])
+        finally:
+            client.destroy()
+
+    def test_action_cross_next_and_extended_pose(self):
+        node = self.make_bridge(enable_motion_actions=True)
+        port = self.ports[-1]
+        port.inject(velpos_packet())
+        node.tick()
+        client, Motion = self.action_client()
+        try:
+            goal = Motion.Goal()
+            goal.command, goal.mode, goal.next_command = 0x81, 1, 0x65
+            goal.x, goal.yaw, goal.speed = 0.1, 0.2, 0.1
+            handle = self.send_action(client, goal)
+            self.assertTrue(handle.accepted)
+            self.spin_until(lambda: node.actions.active is not None and node.actions.active['sent'])
+            self.assertEqual([p.b for p in Parser().feed(port.tx[-1])], [0x81, 0x65])
+            result = handle.get_result_async()
+            port.rx.extend(frame(0x6F, 0x65, b'\xff\x00', 151, 1))
+            node.tick()
+            self.assertFalse(result.done())
+            payload = b'\xff\x00\x01' + struct.pack('<4i', 10000, -10000, 0, 2000)
+            port.rx.extend(frame(0x6F, 0x81, payload, 151, 1))
+            self.spin_until(result.done)
+            self.assertTrue(result.result().result.pose_valid)
+            self.assertEqual(result.result().result.pose.pose.position.x, 1.0)
+        finally:
+            client.destroy()
