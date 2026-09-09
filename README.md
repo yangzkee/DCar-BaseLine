@@ -1,7 +1,15 @@
 # DCar 官方小车例程 - STM32F103C8T6 / Arduino / ROS 2
 
 新增 [ROS 2 客户端](ros2/README.md)：轻量 Python DFLink 桥接包，面向 Windows 原生运行，
-提供标准 `/odom`、可选 `/imu/data` 和 `/cmd_vel` 接口，与 STM32F1、Arduino 示例并列维护。
+提供 `/odom`、可选 `/imu/data`、`/cmd_vel` 和带进度/结果的 `/motion` Action，
+与 STM32F1、Arduino 示例并列维护。
+
+**第一次使用 ROS？从 [Windows 安装到真车运行的中文教程](ros2/docs/windows-tutorial.md) 开始。**
+教程包含下载、分支选择、安装、编译、串口识别、读取里程计、15°旋转和常见问题。
+
+ROS 开发分支：[`codex/windows-ros2-bridge`](https://github.com/yangzkee/DCar-BaseLine/tree/codex/windows-ros2-bridge)，
+对应 [PR #1](https://github.com/yangzkee/DCar-BaseLine/pull/1)。截至 2026-09-10 尚未合并到 `main`；
+若首页看不到 `ros2/`，请先切换到该分支。原 Release ZIP 不含这次 ROS 新增内容。
 
 适用于 STM32F103C8T6 的 DCar / DcarON 小车底盘通信例程，现已对齐 DFCom v2 协议。
 
@@ -31,7 +39,9 @@ https://differ-tech.pages.dev/portal/view/dcar-fast-motion-control
 
 3. **ROS 2 电脑端**：见 [原生 Windows / Linux 开发说明](ros2/README.md)，直接用标准话题接入底盘。
 
-三条路径共用同一套协议和坐标系；ROS 2 首版提供持续速度与遥测接口。
+三条路径共用同一套协议和坐标系；ROS 2 另提供旋转、位移、圆弧、平移并转向和分段轨迹。
+ROS 2 在 Windows 原生环境完成了构建、28 项测试和真车旋转验证；其余动作的现场验证范围见
+[实测记录](ros2/docs/motion-validation-2026-09-10.md)。
 
 ## 硬件接线（STM32F103C8T6）
 

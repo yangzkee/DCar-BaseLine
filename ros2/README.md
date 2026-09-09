@@ -1,5 +1,9 @@
 # DcarON ROS 2 客户端
 
+**新手入口：[Windows 从安装到运行详细教程](docs/windows-tutorial.md)。**
+包含 GitHub 分支/目录说明、首次安装、每天启动、读取回传和分步运动测试。
+查接口和参数继续阅读本页，查动作字段见 [motion.md](docs/motion.md)。
+
 一个 Python 节点将 DFLink 串口变成 ROS 2 标准话题。与本仓库 STM32F1、Arduino
 例程并列维护；ROS 2 运行在电脑上，电脑通过 USB-TTL 直接连接 **Dcar 底盘通信口**，
 不需要串接 STM32F1 示例板，也不要连接示例板的 115200 日志口。
