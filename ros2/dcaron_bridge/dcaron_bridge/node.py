@@ -81,7 +81,8 @@ class DcaronBridge(Node):
         self.timer = self.create_timer(0.01, self.tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.get_logger().info(
             f"DFLink port={c['port']} baud={c['baudrate']} robot={c['robot_id']} "
-            f"stream={c['telemetry']} frequency={c['frequency']}Hz motion={c['enable_cmd_vel']}")
+            f"stream={c['telemetry']} frequency={c['frequency']}Hz "
+            f"cmd_vel={c['enable_cmd_vel']} actions={c['enable_motion_actions']}")
 
     def write(self, data):
         if self.port is None:

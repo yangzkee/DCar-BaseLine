@@ -98,3 +98,7 @@ python ros2/tools/probe_rotation.py --port COM5 --degrees 15 --rate 0.2 --timeou
 
 该脚本先确认 VelPos 遥测，再发送旋转，记录进度/完成/前后航向，退出时发零并关闭
 连续订阅。省略 degrees 时只读遥测；诊断工具限制在 ±30°、0.3rad/s 内。
+
+已激活 ROS 与安装环境时，可用 `tools/probe_ros_rotation.py` 执行同样的小角度
+Action 测试。它自带桥接节点和客户端，不能与另一个 COM5 桥接同时启动。
+已完成结果见 [运动与真车验证记录](motion-validation-2026-09-10.md)。

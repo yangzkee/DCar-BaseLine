@@ -6,6 +6,10 @@ param(
     [switch]$EnableActions
 )
 $ErrorActionPreference = 'Stop'
+$bridgePreviousUtf8 = $env:PYTHONUTF8
+$bridgePreviousEncoding = $env:PYTHONIOENCODING
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
 $bridgeWorkspace = Split-Path $PSScriptRoot -Parent
 Push-Location $bridgeWorkspace
 try {
@@ -42,4 +46,6 @@ try {
     }
 } finally {
     Pop-Location
+    $env:PYTHONUTF8 = $bridgePreviousUtf8
+    $env:PYTHONIOENCODING = $bridgePreviousEncoding
 }

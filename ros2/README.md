@@ -57,6 +57,9 @@ python -c "import rclpy, serial; from nav_msgs.msg import Odometry; print('OK')"
 然后进入本仓库 `ros2` 目录：
 
 ```bat
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+chcp 65001
 colcon build --merge-install --base-paths . --packages-up-to dcaron_bridge
 call install\local_setup.bat
 python -m serial.tools.list_ports
@@ -166,8 +169,9 @@ python -m unittest discover -s test -p test_motion.py -v
 容器的 colcon 构建、安装入口、launch 参数和真实 ROS 话题＋模拟串口集成检查。
 覆盖报文、单位、粘包分包、噪声、版本、超时、地址过滤和重连等行为。
 
-**原生 Windows ROS 运行态和真车仍需单独验证。** Windows 协议检查通过不等于
-硬件联调或所有 ROS 发行版验证通过。
+**已完成 Windows 原生 ROS 2 Lyrical 构建、28 项测试及真车 15° 旋转验证。**
+详见 [运动接口与真车验证记录](docs/motion-validation-2026-09-10.md)。直线/圆弧等
+实际落地精度、十字标和其他 ROS 发行版仍需分别验证。
 
 协议修改先更新仓库主协议文档和报文测试，再更新 `protocol.py`；ROS 转换集中在
 `node.py`。不复制 MCU 固件进 ROS 包，不提交安装环境或 colcon 生成目录。
