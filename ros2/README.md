@@ -148,6 +148,8 @@ ros2 topic echo /imu/data --once
 
 ## 验证与维护
 
+已完成首版检查，具体环境和结果见 [2026-09-10 验证记录](docs/validation-2026-09-10.md)。
+
 无需 ROS 的协议测试（Windows/Linux 均可）：
 
 ```text
