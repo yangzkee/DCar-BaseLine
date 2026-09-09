@@ -1,4 +1,7 @@
-# DCar 官方小车例程 - STM32F103C8T6 / DFCom v2
+# DCar 官方小车例程 - STM32F103C8T6 / Arduino / ROS 2
+
+新增 [ROS 2 客户端](ros2/README.md)：轻量 Python DFLink 桥接包，面向 Windows 原生运行，
+提供标准 `/odom`、可选 `/imu/data` 和 `/cmd_vel` 接口，与 STM32F1、Arduino 示例并列维护。
 
 适用于 STM32F103C8T6 的 DCar / DcarON 小车底盘通信例程，现已对齐 DFCom v2 协议。
 
@@ -14,18 +17,21 @@ https://differ-tech.pages.dev/portal/view/dcar-fast-motion-control
 ├── DFCom_Example/          # STM32 Keil 示例工程（主线）
 ├── DFCom_PatchOnly/        # 通信核心文件（用于移植）
 ├── DFCom_Arduino/          # Arduino 库 + 示例（新增）
+├── ros2/                   # ROS 2 Python 串口桥接包 + 配置/测试
 ├── tests/host/             # STM32 DFCom 收发/运动槽离线时序测试
 ├── tests/arduino/          # Arduino 库与单文件版离线时序测试
 ├── MG520_Firmware_Update... # MG520 固件更新包
 └── README.md               # 本说明
 ```
 
-## 两条起步路径
+## 三条起步路径
 
 1. **STM32 正式版（Keil）**：面向工程化开发与上线调试。  
 2. **Arduino 快速版**：适合先把动作跑起来、先做教学验证。
 
-两条路径共用同一套协议、坐标系和动作语义。
+3. **ROS 2 电脑端**：见 [原生 Windows / Linux 开发说明](ros2/README.md)，直接用标准话题接入底盘。
+
+三条路径共用同一套协议和坐标系；ROS 2 首版提供持续速度与遥测接口。
 
 ## 硬件接线（STM32F103C8T6）
 
