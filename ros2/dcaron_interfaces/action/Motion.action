@@ -1,0 +1,36 @@
+# Relative motion; all values use SI. Command values match DFLink B.
+uint8 ROTATE=99
+uint8 LINEAR=100
+uint8 LINEAR_WITH_YAW=101
+uint8 ARC=102
+uint8 CROSS_RECORD=128
+uint8 CROSS_LOCALIZE=129
+uint8 CONST=0
+uint8 TRAPEZOID=1
+uint8 DIST_LOOP=2
+uint8 FIRST=0
+uint8 NEXT=1
+uint8 command
+float64 x
+float64 y
+float64 yaw
+float64 speed
+float64 angular_speed
+float64 radius
+uint8 profile
+uint8 mode
+# CROSS_LOCALIZE/NEXT: immediately bind LINEAR or LINEAR_WITH_YAW.
+uint8 next_command
+# 0 uses the configured default, otherwise positive seconds <= max_motion_timeout.
+float64 timeout
+---
+bool success
+uint8 notice
+string message
+# Only successful cross-marker results carry a captured pose.
+bool pose_valid
+geometry_msgs/PoseStamped pose
+---
+uint8 process
+float32 percent
+uint8 notice

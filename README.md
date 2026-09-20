@@ -2,7 +2,7 @@
 
 通过串口控制 DCar / DcarON 小车，从第一个运动指令开始，学习接线、运动编排、里程计读取和通信调试。
 
-本仓库提供运行在**外部开发板**上的客户端代码。目前包含 STM32F103 Keil 工程、Arduino 库与示例，以及用于接入已有 STM32 工程的移植包。
+本仓库提供运行在**外部开发板或电脑**上的客户端代码。本开发分支包含 STM32F103 Keil 工程、电赛固定路线、Arduino 库与示例、STM32 移植包，以及在电脑上运行的 ROS 2 桥接包。
 
 **第一次来：先选平台，再按对应教程运行，最后修改动作。** 稳定版的各平台放在 `main` 的不同目录中，选平台不需要切换 Git 分支；开发中的新功能统一放在 `develop`。
 
@@ -11,6 +11,8 @@
 [产品与完整教程](https://differ-tech.pages.dev/portal/view/dcar-fast-motion-control) · [DFLink V3 对外协议手册](DFLink_V3协议手册_对外版.md) · [版本下载](https://github.com/yangzkee/DCar-BaseLine/releases) · [问题反馈](https://github.com/yangzkee/DCar-BaseLine/issues)
 
 <a id="platforms"></a>
+> 当前是 `develop` 开发集成版。需要稳定入门例程，请前往 [main 首页](https://github.com/yangzkee/DCar-BaseLine/tree/main)。
+
 ## 1. 选择你的平台
 
 | 你的目标 | 从这里开始 | 开发环境与使用前提 |
@@ -19,8 +21,8 @@
 | 用 Arduino IDE 学习，调用库函数控制小车 | [Arduino 库与示例教程](DFCom_Arduino/README.md) | Uno / Nano（ATmega328P）；现有例程要求底盘 USART3 的 115200 双向通信支持，见下方前提 |
 | 不安装库，直接查看一个完整 Arduino 程序 | [Arduino 单文件示例](DFCom_Arduino/SingleFile/DcarON_Square_AllInOne/DcarON_Square_AllInOne.ino) | 与 Arduino 库版相同的接线、开发板和底盘固件前提 |
 | 把通信功能接入自己已有的 STM32 工程 | [STM32 移植包说明](DFCom_PatchOnly/README.md) | 需要目标工程原有的启动代码、标准库和系统辅助文件；不是独立完整工程 |
-| 体验 ROS 2 与 Windows 教程 | [develop 中的 ROS 2 教程](https://github.com/yangzkee/DCar-BaseLine/blob/develop/ros2/README.md) | 开发版，尚未合入稳定分支；实际验证范围见该目录文档 |
-| 体验 2026 电赛 H/D 固定路线 | [develop 开发版首页](https://github.com/yangzkee/DCar-BaseLine/tree/develop#nuedc) | 开发版 STM32 路线，运行行为与稳定版不同，先阅读说明 |
+| 体验 ROS 2 与 Windows 教程 | [ROS 2 教程](ros2/README.md) | 开发版，尚未合入稳定分支；实际验证范围见该目录文档 |
+| 体验 2026 电赛 H/D 固定路线 | [本页固定路线说明](#nuedc) | 开发版 STM32 路线，运行行为与稳定版不同，先阅读说明 |
 | 使用 ROS 1 或独立 Python 入门例程 | 当前尚未提供对应独立教程 | 可以先阅读协议手册 |
 
 > **底盘兼容性：** 选对客户端开发板之后，还要确认底盘固件支持对应通信口、波特率、运动指令和回传格式。当前仓库尚未列出完整的底盘固件版本兼容表，不能据此认为所有历史固件都能直接使用。
@@ -33,7 +35,7 @@
 - **使用 Git 持续维护：** 克隆仓库后进入所选目录，各平台独立使用，不必安装其他平台的开发环境。
 
 ```sh
-git clone https://github.com/yangzkee/DCar-BaseLine.git
+git clone --branch develop https://github.com/yangzkee/DCar-BaseLine.git
 cd DCar-BaseLine
 ```
 
@@ -133,6 +135,8 @@ sh tests/host/run_nuedc_2026_integration_checks.sh
 <a id="debugging"></a>
 ## 6. 修改与调试导航
 
+ROS 2 用户从 [Windows 逐步安装教程](ros2/docs/windows-tutorial.md) 开始，再读 [桥接包说明](ros2/README.md)、[运动动作与轨迹](ros2/docs/motion.md) 和 [已有实车验证记录](ros2/docs/motion-validation-2026-09-10.md)。该记录目前仅覆盖部分动作，不能当作所有轨迹已验证。
+
 ### 想改什么，就看哪里
 
 | 目标 | STM32 | Arduino |
@@ -202,6 +206,16 @@ STM32 用 `g_dfcom_unit_mode = DFCOM_UNIT_M` 切到 SI；Arduino 用 `DFCom.useM
 ```sh
 sh tests/host/run_move_slots_tests.sh
 sh tests/arduino/run_arduino_tests.sh
+sh tests/host/run_nuedc_2026_routes_tests.sh
+sh tests/host/run_nuedc_2026_integration_checks.sh
+```
+
+ROS 2 的协议与运动逻辑可在未安装 ROS 的 Python 环境测试：
+
+```sh
+cd ros2/dcaron_bridge
+python3 -m unittest discover -s test -p test_protocol.py -v
+python3 -m unittest discover -s test -p test_motion.py -v
 ```
 
 测试覆盖 STM32 完整工程与移植包、Arduino 库与单文件版的运动等待等逻辑；它们不能代替 Keil / AVR 目标编译和真实底盘通信验证。

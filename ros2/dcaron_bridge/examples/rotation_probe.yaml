@@ -1,0 +1,5 @@
+# 15 degrees CCW; only runs with motion_sequence --execute.
+- command: ROTATE
+  yaw: 0.2617993877991494
+  angular_speed: 0.2
+  timeout: 8.0
