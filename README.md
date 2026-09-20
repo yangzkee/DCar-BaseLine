@@ -4,7 +4,7 @@
 
 本仓库提供运行在**外部开发板**上的客户端代码。目前包含 STM32F103 Keil 工程、Arduino 库与示例，以及用于接入已有 STM32 工程的移植包。
 
-**第一次来：先选平台，再按对应教程运行，最后修改动作。** 各平台放在同一个 `main` 分支的不同目录中，选平台不需要切换 Git 分支。
+**第一次来：先选平台，再按对应教程运行，最后修改动作。** 稳定版的各平台放在 `main` 的不同目录中，选平台不需要切换 Git 分支；开发中的新功能统一放在 `develop`。
 
 [选择平台](#platforms) · [下载例程](#download) · [学习路线](#learning) · [STM32 快速开始](#stm32) · [Arduino 快速开始](#arduino) · [修改与调试](#debugging) · [协议与单位](#protocol) · [参与维护](#contributing)
 
@@ -19,7 +19,9 @@
 | 用 Arduino IDE 学习，调用库函数控制小车 | [Arduino 库与示例教程](DFCom_Arduino/README.md) | Uno / Nano（ATmega328P）；现有例程要求底盘 USART3 的 115200 双向通信支持，见下方前提 |
 | 不安装库，直接查看一个完整 Arduino 程序 | [Arduino 单文件示例](DFCom_Arduino/SingleFile/DcarON_Square_AllInOne/DcarON_Square_AllInOne.ino) | 与 Arduino 库版相同的接线、开发板和底盘固件前提 |
 | 把通信功能接入自己已有的 STM32 工程 | [STM32 移植包说明](DFCom_PatchOnly/README.md) | 需要目标工程原有的启动代码、标准库和系统辅助文件；不是独立完整工程 |
-| 使用 ROS 1、ROS 2 或 Python | 当前仓库尚未提供对应示例 | 可以先阅读协议手册；后续平台完成后会在此增加入口 |
+| 体验 ROS 2 与 Windows 教程 | [develop 中的 ROS 2 教程](https://github.com/yangzkee/DCar-BaseLine/blob/develop/ros2/README.md) | 开发版，尚未合入稳定分支；实际验证范围见该目录文档 |
+| 体验 2026 电赛 H/D 固定路线 | [develop 开发版首页](https://github.com/yangzkee/DCar-BaseLine/tree/develop#nuedc) | 开发版 STM32 路线，运行行为与稳定版不同，先阅读说明 |
+| 使用 ROS 1 或独立 Python 入门例程 | 当前尚未提供对应独立教程 | 可以先阅读协议手册 |
 
 > **底盘兼容性：** 选对客户端开发板之后，还要确认底盘固件支持对应通信口、波特率、运动指令和回传格式。当前仓库尚未列出完整的底盘固件版本兼容表，不能据此认为所有历史固件都能直接使用。
 
@@ -35,7 +37,7 @@ git clone https://github.com/yangzkee/DCar-BaseLine.git
 cd DCar-BaseLine
 ```
 
-`main` 是当前开发主线；Release / 标签用于保存发布时的版本。发布附件不一定包含 `main` 后续的修复，反馈问题时请注明下载的标签或提交号。
+`main` 是稳定发布分支，`develop` 是开发集成分支；Release / 标签用于保存正式发布时的版本。发布附件不一定包含分支后续的修复，反馈问题时请注明分支、标签或提交号。
 
 <a id="learning"></a>
 ## 3. 从入门到修改的学习路线
@@ -149,7 +151,14 @@ STM32 用 `g_dfcom_unit_mode = DFCOM_UNIT_M` 切到 SI；Arduino 用 `DFCom.useM
 <a id="contributing"></a>
 ## 8. 参与维护与反馈
 
-平台用目录区分，发布版本用标签区分。开发修改可以使用临时分支和 Pull Request，合入 `main` 后用户仍从统一首页选择平台。
+仓库保持两个长期分支：
+
+| 分支 | 用途 | 适合谁 |
+|---|---|---|
+| `main` | 稳定发布；开发内容验证后再合入 | 首次学习、按发布教程运行 |
+| `develop` | 汇总新平台、新场景和待验证改动 | 参与开发、体验新功能 |
+
+平台与场景用目录或配置区分，不各自长期占用一个分支。日常开发统一进入 `develop`，验证后通过 Pull Request 合入 `main`，正式发布再打标签。确有并行协作需要时可短期开任务分支，合入后及时清理。
 
 维护例程时，请同步更新对应教程中的接线、开发环境、单位和底盘固件要求；新增平台应提供独立运行说明，并在首页标明实际支持状态。修改完整工程、移植包或 Arduino 库时，检查相关副本和单文件示例是否需要同步。
 
