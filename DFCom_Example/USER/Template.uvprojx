@@ -386,6 +386,16 @@
               <FilePath>.\main.c</FilePath>
             </File>
             <File>
+              <FileName>nuedc_2026_routes.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\nuedc_2026_routes.c</FilePath>
+            </File>
+            <File>
+              <FileName>nuedc_2026_routes.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\nuedc_2026_routes.h</FilePath>
+            </File>
+            <File>
               <FileName>stm32f10x_it.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\stm32f10x_it.c</FilePath>

@@ -165,6 +165,7 @@
 #include "usart.h"
 #include "delay.h"
 #include "DFCom.h"
+#include "nuedc_2026_routes.h"
 #include "system_stm32f10x.h"
 
 /* M_PI 在 Keil C90 默认未定义，自己声明 */
@@ -296,6 +297,8 @@ static void Startup_Diagnose(void)
  * ===========================================================================*/
 int main(void)
 {
+    Nuedc2026Status route_status;
+
     /* ─── 1. 初始化（串口、定时器）─────────────────── */
     System_Init();
 
@@ -358,52 +361,18 @@ int main(void)
      *  ⚠ 想手动调用一次: 在你自己代码里直接调 VelPos_Print() 或 Odom_Print()
      * --------------------------------------------------------------*/
 
-    /* ─── 3. 主循环：发指令 + TIM2 自动打 ODOM ────── */
-    while (1)
-    {
-        /* ────────────────────────────────────────────
-         * 当前回归序列：
-         *   1) +X 直线最多 1s
-         *   2) -X 直线最多 1s（同类型连续指令，专门验证旧 FF 隔离）
-         *   3) 左转 15°，最多 1s
-         *   4) 右转 15°，最多 1s（再次验证同类型连续指令）
-         *
-         * 入门玩法：注释掉 WaitMoveDone，加 delay_ms(3000)
-         * 进阶玩法：用 WaitMoveDone 等小车真到位（当前就是）
-         *
-         * 默认 CM 模式：速度统一 30 cm/s (约 0.3 m/s)
-         * 想改 SI 模式：System_Init 里打开 g_dfcom_unit_mode = DFCOM_UNIT_M
-         *               然后把下面数值改成 0.5f / 0.3f 等
-         *
-         * ★ WaitMoveDone 第二参是任务允许执行的最长时间
-         *   1000 = 最多执行 1 秒；1 秒内提前完成就立即进入下一条，
-         *   1 秒仍未完成就返回 TIMEOUT，下一条运动命令会合法打断它。
-         *   0 才表示永久等待。A/B 交替槽会吞掉上一任务随后到达的终止帧，
-         *   不会把旧任务的 FF 错认成新任务完成。
-         *
-         * ★ WaitMoveDone 第一参 = CMD_xx, 必须跟刚发的指令对应!
-         *   Cmd_Move_Linear         → CMD_LINEAR           (0x64)
-         *   Cmd_Move_LinearWithYaw  → CMD_LINEAR_WITH_YAW  (0x65)
-         *   Cmd_Move_Rot            → CMD_ROT              (0x63)
-         *   Cmd_Move_Arc            → CMD_ARC              (0x66)
-         *   Cmd_Move_Vel            → ★ 别用 WaitMoveDone (没完成回传)
-         * ────────────────────────────────────────────*/
-        /* ★ Cmd_Move_Linear 第 4 参 = profile:
-         *   0 = 匀速 (起停硬, 短距精确到位)
-         *   1 = 加减速 (★ 推荐, 平滑梯形 ramp)
-         */
-        Cmd_Move_Linear( 50,   0,  30, 2);  WaitMoveDone(CMD_LINEAR, 1000);  /* +X 前进 50cm, Profile 2 */
-        Cmd_Move_Linear(-50,   0,  30, 2);  WaitMoveDone(CMD_LINEAR, 1000);  /* -X 后退 50cm */
-        Cmd_Move_Rot( 15, 60);  WaitMoveDone(CMD_ROT, 1000);/* 原地左转 15°（CCW 逆时针，60 deg/s）*/
-        Cmd_Move_Rot( -15, 60);  WaitMoveDone(CMD_ROT, 1000);/* 原地右转 15°（CW 顺时针，60 deg/s）*/
+    /* ─── 3. 2026 电赛固定路线：延时一次运行，完成后不自动重复 ──────
+     * 修改 nuedc_2026_routes.h 中的 NUEDC_2026_ACTIVE_ROUTE，
+     * 即可在 H 题与 D 题之间切换。路线只使用里程计，不读取光电。
+     */
+    printf("[2026] selected route=%d, start in %lu ms\r\n",
+           (int)NUEDC_2026_ACTIVE_ROUTE,
+           (unsigned long)NUEDC_2026_START_DELAY_MS);
+    delay_ms(NUEDC_2026_START_DELAY_MS);
+    route_status = Nuedc2026_RunSelectedRoute();
+    printf("[2026] route finished, status=%d\r\n", (int)route_status);
 
-        /* 想画整圆？取消注释下面这行（半径 30cm, 圆心角 360°, 20 cm/s, 加减速）：*/
-        // Cmd_Move_Arc(30, 360, 20, 1);  WaitMoveDone(CMD_ARC, 0);
-
-        /* 想原地左转 90°（CCW 逆时针，60 deg/s）？*/
-        // Cmd_Move_Rot( 90, 60);  WaitMoveDone(CMD_ROT, 0);
-
-        /* 想原地右转 90°（CW 顺时针，dyaw 取负）？*/
-        // Cmd_Move_Rot(-90, 60);  WaitMoveDone(CMD_ROT, 0);
+    while (1) {
+        delay_ms(1000);
     }
 }

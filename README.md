@@ -78,9 +78,44 @@ TX/RX 交叉连接，使用匹配的 3.3V TTL 电平；底盘独立按产品要�
 
 ### 从哪里开始改
 
-打开 [USER/main.c](DFCom_Example/USER/main.c)，找到 `while (1)`。当前程序循环执行前进、后退、左转、右转，用来验证连续运动指令；每条指令最多等待 1 秒，**不保证每段 50 cm 都走完**。
+本开发分支的 [USER/main.c](DFCom_Example/USER/main.c) 已接入电赛固定路线：启动握手完成后等待 3 秒，自动运行所选路线一次。参数入口是 [nuedc_2026_routes.h](DFCom_Example/USER/nuedc_2026_routes.h)，详见下方说明。稳定版 `main` 仍保留往返和转向示例。
 
-建议先保留初始化和启动运动会话处理，只修改主循环中的一个距离、速度或转角，再观察实际效果。需要完整 API、订阅与反馈字段说明时，继续阅读 [STM32 详细教程](DFCom_Example/README.md)。
+开发版修改路线时保留初始化和启动运动会话处理，优先调整路线参数头文件；学习最基础的单条动作可以先使用稳定版 `main`。需要完整 API、订阅与反馈字段说明时，继续阅读 [STM32 详细教程](DFCom_Example/README.md)。
+
+<a id="nuedc"></a>
+## 2026 电赛 H/D 题固定赛道
+
+STM32 主工程现提供两套独立的胶囊形固定路线，均从 A 点顺时针运行一圈：
+
+- H 题：1.5 m 直线、0.50 m 半圆、1.5 m 直线、0.50 m 半圆；默认 0.34 m/s。
+- D 题：1.5 m 直线、0.741 m 半圆、1.5 m 直线、0.741 m 半圆；默认 0.25 m/s。
+
+路线使用连续速度指令，按局部里程投影结束直线、按累计航向结束半圆；四段之间
+不停车，只在完成一圈或发生里程失联/超时时停车。实现不读取光电、灰度或其他
+循线传感器。
+
+唯一调参入口：
+
+```text
+DFCom_Example/USER/nuedc_2026_routes.h
+```
+
+修改下面一个宏即可选择烧录后执行 H 或 D，默认 H：
+
+```c
+#define NUEDC_2026_ACTIVE_ROUTE NUEDC_2026_ROUTE_H
+```
+
+主程序完成通信握手后等待 3 秒，自动执行所选路线一次并停车；需要重跑时按开发
+板复位键。D 题半径按已确认的 741 mm 印刷地图设置；若使用官方 750 mm 场地，
+将 `NUEDC_2026_D_RADIUS_M` 改为 `0.750f`。
+
+路线主机仿真测试：
+
+```sh
+sh tests/host/run_nuedc_2026_routes_tests.sh
+sh tests/host/run_nuedc_2026_integration_checks.sh
+```
 
 <a id="arduino"></a>
 ## 5. Arduino 快速开始
