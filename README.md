@@ -210,7 +210,7 @@ sh tests/host/run_nuedc_2026_routes_tests.sh
 sh tests/host/run_nuedc_2026_integration_checks.sh
 ```
 
-ROS 2 的协议与运动逻辑可在未安装 ROS 的 Python 环境测试：
+ROS 2 的协议与运动逻辑可在未安装 ROS 的 Python 3.12 环境测试（与仓库 CI 一致；不要使用系统自带的 Python 3.9）：
 
 ```sh
 cd ros2/dcaron_bridge
