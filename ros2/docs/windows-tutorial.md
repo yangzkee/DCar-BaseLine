@@ -5,11 +5,11 @@
 
 ## 1. GitHub 上为什么看不到 ros2 文件夹？
 
-ROS 2 代码统一在 **`develop`** 开发集成分支维护；`main` 是稳定发布分支。原始开发讨论保留在 [PR #1](https://github.com/yangzkee/DCar-BaseLine/pull/1)，后续发布通过 `develop` → `main` 合入。
+ROS 2 代码已合入 **`main`**，首次使用直接下载主线；后续开发在 `develop` 集成。原始开发讨论保留在 [PR #1](https://github.com/yangzkee/DCar-BaseLine/pull/1)，后续发布通过 `develop` → `main` 合入。
 
-1. 打开 [开发分支首页](https://github.com/yangzkee/DCar-BaseLine/tree/develop)。
-2. 或点仓库左上角 `main` 下拉框，在搜索框输入 `develop`，选择同名分支。
-3. 进入 `ros2`。`Tags` 里的 `v1.0.0` 是旧版本标签，不是这次开发分支。
+1. 打开 [主线首页](https://github.com/yangzkee/DCar-BaseLine/tree/main)。
+2. 或点仓库左上角 `main` 下拉框，选择 `main` 分支。
+3. 进入 `ros2`。`Tags` 里的 `v1.0.0` 是旧版本标签，不包含此次主线新增的 ROS 2 包。
 4. 不用再次点击 `Compare & pull request` 创建重复 PR；已有 PR #1。
 
 `README.md` 是 GitHub 自动显示的说明文档，不是一条需要执行的命令。
@@ -83,18 +83,18 @@ ROS 升级时应重新验证，不直接覆盖正在使用的安装目录。
 
 ```bat
 cd /d "%USERPROFILE%\Desktop"
-git clone --branch develop https://github.com/yangzkee/DCar-BaseLine.git
+git clone --branch main https://github.com/yangzkee/DCar-BaseLine.git
 cd DCar-BaseLine
 git branch --show-current
 ```
 
-最后应显示 `develop`。已有同名仓库时不要重复 clone，先查看状态：
+最后应显示 `main`。已有同名仓库时不要重复 clone，先查看状态：
 
 ```bat
 cd /d "%USERPROFILE%\Desktop\DCar-BaseLine"
 git status
 git fetch origin
-git switch develop
+git switch main
 git pull --ff-only
 ```
 
@@ -242,7 +242,7 @@ Pro 全量 IMU 数据用 `telemetry:=odom`，还要求底盘授权和固件支�
 
 | 现象 | 检查方式 |
 |---|---|
-| GitHub 没有 ros2 | 切到 `develop`，不要停留在 main 或旧标签 |
+| GitHub 没有 ros2 | 更新到最新 `main`，不要停留在旧提交或旧标签 |
 | pixi / git 不是内部命令 | 安装后重新打开终端，确认 PATH；本机便携 Pixi 可用完整 exe 路径 |
 | 找不到 rclpy / DLL 加载失败 | 执行第6节，`where python` 检查是否来自 ROS 的 Pixi 环境，不混用系统 Python |
 | 找不到 dcaron_bridge / Motion | 确认两包构建成功，执行 C 盘短路径的 install/local_setup.bat |

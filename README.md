@@ -2,7 +2,7 @@
 
 通过串口控制 DCar / DcarON 小车，从第一个运动指令开始，学习接线、运动编排、里程计读取和通信调试。
 
-本仓库提供运行在**外部开发板或电脑**上的客户端代码。本开发分支包含 STM32F103 Keil 工程、电赛固定路线、Arduino 库与示例、STM32 移植包，以及在电脑上运行的 ROS 2 桥接包。
+本仓库提供运行在**外部开发板或电脑**上的客户端代码。目前包含 STM32F103 Keil 工程、电赛固定路线、Arduino 库与示例、STM32 移植包，以及在电脑上运行的 ROS 2 桥接包。
 
 **第一次来：先选平台，再按对应教程运行，最后修改动作。** 稳定版的各平台放在 `main` 的不同目录中，选平台不需要切换 Git 分支；开发中的新功能统一放在 `develop`。
 
@@ -11,7 +11,7 @@
 [产品与完整教程](https://differ-tech.pages.dev/portal/view/dcar-fast-motion-control) · [DFLink V3 对外协议手册](DFLink_V3协议手册_对外版.md) · [版本下载](https://github.com/yangzkee/DCar-BaseLine/releases) · [问题反馈](https://github.com/yangzkee/DCar-BaseLine/issues)
 
 <a id="platforms"></a>
-> 当前是 `develop` 开发集成版。需要稳定入门例程，请前往 [main 首页](https://github.com/yangzkee/DCar-BaseLine/tree/main)。
+> ROS 2 与电赛路线已纳入统一主线。代码合入不代表所有硬件场景都已完成实测，具体范围见各平台的验证记录。
 
 ## 1. 选择你的平台
 
@@ -21,8 +21,8 @@
 | 用 Arduino IDE 学习，调用库函数控制小车 | [Arduino 库与示例教程](DFCom_Arduino/README.md) | Uno / Nano（ATmega328P）；现有例程要求底盘 USART3 的 115200 双向通信支持，见下方前提 |
 | 不安装库，直接查看一个完整 Arduino 程序 | [Arduino 单文件示例](DFCom_Arduino/SingleFile/DcarON_Square_AllInOne/DcarON_Square_AllInOne.ino) | 与 Arduino 库版相同的接线、开发板和底盘固件前提 |
 | 把通信功能接入自己已有的 STM32 工程 | [STM32 移植包说明](DFCom_PatchOnly/README.md) | 需要目标工程原有的启动代码、标准库和系统辅助文件；不是独立完整工程 |
-| 体验 ROS 2 与 Windows 教程 | [ROS 2 教程](ros2/README.md) | 开发版，尚未合入稳定分支；实际验证范围见该目录文档 |
-| 体验 2026 电赛 H/D 固定路线 | [本页固定路线说明](#nuedc) | 开发版 STM32 路线，运行行为与稳定版不同，先阅读说明 |
+| 体验 ROS 2 与 Windows 教程 | [ROS 2 教程](ros2/README.md) | 已纳入主线；实际验证范围见该目录文档 |
+| 体验 2026 电赛 H/D 固定路线 | [本页固定路线说明](#nuedc) | STM32 当前默认路线依赖 Pro 全量 Odom 回传，先阅读说明 |
 | 使用 ROS 1 或独立 Python 入门例程 | 当前尚未提供对应独立教程 | 可以先阅读协议手册 |
 
 > **底盘兼容性：** 选对客户端开发板之后，还要确认底盘固件支持对应通信口、波特率、运动指令和回传格式。当前仓库尚未列出完整的底盘固件版本兼容表，不能据此认为所有历史固件都能直接使用。
@@ -35,7 +35,7 @@
 - **使用 Git 持续维护：** 克隆仓库后进入所选目录，各平台独立使用，不必安装其他平台的开发环境。
 
 ```sh
-git clone --branch develop https://github.com/yangzkee/DCar-BaseLine.git
+git clone --branch main https://github.com/yangzkee/DCar-BaseLine.git
 cd DCar-BaseLine
 ```
 
@@ -80,12 +80,14 @@ TX/RX 交叉连接，使用匹配的 3.3V TTL 电平；底盘独立按产品要�
 
 ### 从哪里开始改
 
-本开发分支的 [USER/main.c](DFCom_Example/USER/main.c) 已接入电赛固定路线：启动握手完成后等待 3 秒，自动运行所选路线一次。参数入口是 [nuedc_2026_routes.h](DFCom_Example/USER/nuedc_2026_routes.h)，详见下方说明。稳定版 `main` 仍保留往返和转向示例。
+当前 [USER/main.c](DFCom_Example/USER/main.c) 已接入电赛固定路线：启动握手完成后等待 3 秒，自动运行所选路线一次。参数入口是 [nuedc_2026_routes.h](DFCom_Example/USER/nuedc_2026_routes.h)，详见下方说明。原往返与转向示例可在历史提交 `bd591db` 中查看。
 
-开发版修改路线时保留初始化和启动运动会话处理，优先调整路线参数头文件；学习最基础的单条动作可以先使用稳定版 `main`。需要完整 API、订阅与反馈字段说明时，继续阅读 [STM32 详细教程](DFCom_Example/README.md)。
+修改路线时保留初始化和启动运动会话处理，优先调整路线参数头文件；学习单条动作可参考 STM32 教程中的 API 示例。需要完整 API、订阅与反馈字段说明时，继续阅读 [STM32 详细教程](DFCom_Example/README.md)。
 
 <a id="nuedc"></a>
 ## 2026 电赛 H/D 题固定赛道
+
+当前 STM32 默认主程序需要底盘支持 Pro 全量 Odom（0x80）回传。只有 VelPos 回传时，路线会因 `ODOM_STALE` 停止；这不代表串口或基础运动能力失效。Pro 是软件/授权档位。
 
 STM32 主工程现提供两套独立的胶囊形固定路线，均从 A 点顺时针运行一圈：
 
@@ -161,6 +163,8 @@ ROS 2 用户从 [Windows 逐步安装教程](ros2/docs/windows-tutorial.md) 开�
 | Arduino 间歇丢数据 | 减少 SoftwareSerial 打印，降低订阅频率，检查接线与电平 |
 
 ### 运动等待的含义
+
+STM32 接收器的半帧拼接与单批处理上限存在已复现的完成帧遗漏问题，详见 [接收链路排查记录](docs/diagnostics/stm32-completion-frame.md)。等待超时不等于底盘没有执行完成。
 
 - STM32：`WaitMoveDone(CMD_LINEAR, 10000)` 等待对应直线任务；Arduino：`DFCom.waitDone(10000)` 等待当前任务。两者都是“收到完成信息就返回，否则最多等待 10 秒”。
 - **等待超时不会自动发停车指令，也不证明动作完成。** 应检查返回值，再决定重试、停车或发送下一条运动指令；下一条指令可以打断上一条。
