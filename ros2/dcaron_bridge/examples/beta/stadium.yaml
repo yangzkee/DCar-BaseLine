@@ -1,0 +1,7 @@
+# Holonomic chassis only. Reverse stadium, final straight +360 degree yaw.
+timeout: 60.0
+segments:
+  - {command: 102, radius: 0.3, yaw: 3.141592653589793, speed: -0.15, profile: 18}
+  - {command: 100, x: -0.6, speed: 0.15, profile: 18}
+  - {command: 102, radius: 0.3, yaw: 3.141592653589793, speed: -0.15, profile: 18}
+  - {command: 100, x: -0.6, yaw: 6.283185307179586, speed: 0.15, profile: 18}

@@ -30,13 +30,14 @@ class DcaronBridge(Node):
             "telemetry_timeout": 2.0, "reconnect_interval": 3.0,
             "odom_frame": "odom", "base_frame": "base_link", "imu_frame": "base_link",
             "publish_tf": False,
-            "enable_motion_actions": False, "motion_timeout": 30.0,
+            "motion_protocol": "queue", "enable_motion_actions": False, "motion_timeout": 30.0,
             "max_motion_timeout": 120.0, "max_displacement": 2.0, "max_rotation": 6.283185307179586,
         }
         self.cfg = {key: self.declare_parameter(
             key, value, ParameterDescriptor(read_only=True)).value
             for key, value in defaults.items()}
         c = self.cfg
+        if c["motion_protocol"] not in ("queue", "legacy"): raise ValueError("motion_protocol must be queue or legacy")
         for key in ("cmd_timeout", "max_linear_speed", "max_angular_speed",
                     "telemetry_timeout", "reconnect_interval", "motion_timeout",
                     "max_motion_timeout", "max_displacement", "max_rotation"):

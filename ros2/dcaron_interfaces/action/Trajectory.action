@@ -1,0 +1,15 @@
+# One segment is valid. Default false permits continuous queue lookahead.
+dcaron_interfaces/MotionSegment[] segments
+bool sequential
+float64 timeout
+---
+bool success
+uint8 notice
+string message
+uint16 completed
+---
+uint16 task_id
+uint16 segment_index
+uint8 process
+uint8 notice
+float32 percent

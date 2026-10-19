@@ -26,6 +26,7 @@ jobs:
         run: |
           python -m unittest discover -s test -p test_protocol.py -v
           python -m unittest discover -s test -p test_motion.py -v
+          python -m unittest discover -s test -p test_queue.py -v
 
   ros-runtime:
     runs-on: ubuntu-latest

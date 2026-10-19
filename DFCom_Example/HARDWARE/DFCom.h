@@ -341,4 +341,25 @@ void VelPos_Print(void);            /* VelPos v2 简化版 (默认调) */
 void Odom_Print(void);              /* Odom v4 全量版 (进阶用, 默认 TIM2 里注释) */
 void Odom_PrintTimer_Init(void);    /* 启动 10Hz 自动打印 */
 
+
+/* Beta v6 queue API: SI ONLY, independent of g_dfcom_unit_mode. Main-loop calls only.
+ * Begin performs capability/next-ID handshake; do not mix legacy moves while active.
+ * ID=0 means failure. Wait returns 1 success, 2 timeout/unknown ID, 3 device fault.
+ * At most 8 tracked tasks; consume terminal results with Wait before reusing slots.
+ */
+#define DF_ACCEL_VERY_LOW 16
+#define DF_ACCEL_LOW 17
+#define DF_ACCEL_MEDIUM 18
+#define DF_ACCEL_HIGH 19
+#define DF_ACCEL_VERY_HIGH 20
+u8 DFQueue_Begin(void);
+u16 DFQueue_Linear(float x_m,float y_m,float speed_mps,float yaw_rad,u8 grade);
+u16 DFQueue_Rotate(float yaw_rad,float omega_rad_s);
+u16 DFQueue_Arc(float radius_m,float yaw_rad,float signed_speed_mps,u8 grade);
+u8 DFQueue_Wait(u16 id,u32 timeout_ms);
+u8 DFQueue_Status(u16 id,u8 *process,u8 *notice);
+void DFQueue_Cancel(void);
+/* Called by the validated RX dispatcher, not by application code. */
+void DFQueue_Receive(const u8 *payload,u8 len);
+
 #endif /* __DFCOM_H */

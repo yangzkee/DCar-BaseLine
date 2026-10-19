@@ -649,3 +649,129 @@ void Cmd_Query_DcarState(void)
     cnt = finalize_frame(buf, 0);
     send_frame(buf, cnt);
 }
+
+/* Beta queue v6. Static bounded state; no heap, no ISR logging. */
+#include <math.h>
+#include <string.h>
+extern volatile u32 g_local_tick_ms;
+typedef struct { volatile u16 id; volatile u8 process,notice,received; } DFQueueSlot;
+static DFQueueSlot q_slots[8];
+static volatile u16 q_query_id;
+static volatile u8 q_query_notice,q_query_process,q_query_ready;
+static volatile u8 q_enabled;
+static u16 q_next;
+static void q_manage(u8 op,u16 id) {
+    u8 b[12],n=(op==5)?3:1;
+    build_header(b,2,0x85);b[5]=n;b[6]=op;
+    if(n==3){b[7]=(u8)id;b[8]=(u8)(id>>8);}
+    send_frame(b,finalize_frame(b,n));
+}
+void DFQueue_Receive(const u8 *p,u8 len) {
+    u8 i;u16 id;
+    if(len!=4)return;
+    id=(u16)p[2]|((u16)p[3]<<8);
+    if(p[1]==0x21 || p[1]==0x28){
+        q_query_id=id;q_query_notice=p[1];q_query_process=p[0];q_query_ready=1;return;
+    }
+    if(!q_enabled || !id)return;
+    for(i=0;i<8;i++)if(q_slots[i].id==id){
+        /* Terminal is sticky: late ACK/progress cannot reopen a completed task. */
+        if(q_slots[i].received && q_slots[i].process==255 && q_slots[i].notice!=0x11)return;
+        q_slots[i].process=p[0];q_slots[i].notice=p[1];q_slots[i].received=1;return;
+    }
+}
+static u8 q_query(u8 op,u8 notice) {
+    u8 attempt;u32 start;
+    for(attempt=0;attempt<3;attempt++){
+        q_query_ready=0;q_manage(op,0);start=g_local_tick_ms;
+        while((u32)(g_local_tick_ms-start)<500){
+            if(q_query_ready && q_query_notice==notice)return 1;
+            delay_ms(1);
+        }
+    }
+    return 0;
+}
+u8 DFQueue_Begin(void) {
+    u8 i;
+    /* Refuse to discard outstanding local identities. */
+    for(i=0;i<8;i++)if(q_slots[i].id && (!q_slots[i].received || q_slots[i].process!=255))return 0;
+    q_enabled=0;
+    if(!q_query(0,0x21) || q_query_id<6)return 0;
+    if(!q_query(7,0x28) || !q_query_id || q_query_process!=16)return 0;
+    memset(q_slots,0,sizeof(q_slots));q_next=q_query_id;q_enabled=1;return 1;
+}
+void DFQueue_Cancel(void) {
+    u8 b[21];
+    q_manage(4,0);
+    build_header(b,2,0x62);b[5]=12;memset(b+6,0,12);send_frame(b,finalize_frame(b,12));
+    q_enabled=0;memset(q_slots,0,sizeof(q_slots));
+}
+u8 DFQueue_Status(u16 id,u8 *process,u8 *notice) {
+    u8 i;u32 irq=__get_PRIMASK();__disable_irq();
+    for(i=0;i<8;i++)if(id && q_slots[i].id==id && q_slots[i].received){
+        *process=q_slots[i].process;*notice=q_slots[i].notice;
+        if(!irq)__enable_irq();
+        return 1;
+    }
+    if(!irq)__enable_irq();
+    return 0;
+}
+static u8 q_number(u8 *p,float v) {
+    double scaled=(double)v*10000.0;
+    if(!isfinite(scaled) || scaled>2147483647.0 || scaled<(-2147483647.0-1.0))return 0;
+    put_s32_le(p,(s32)scaled);return 1;
+}
+static u16 q_submit(u8 cmd,const float *values,u8 count,u8 grade) {
+    u8 b[28],i,slot=8,n=(u8)(count*4+(cmd==0x63?0:1)),attempt,process,notice;
+    u16 id;u32 start;
+    if(!q_enabled || grade<16 || grade>20)return 0;
+    for(i=0;i<8;i++)if(!q_slots[i].id){slot=i;break;}
+    if(slot==8)return 0;
+    build_header(b,2,cmd);b[5]=n+2;
+    for(i=0;i<count;i++)if(!q_number(b+6+4*i,values[i]))return 0;
+    if(cmd!=0x63)b[6+n-1]=grade;
+    id=q_next;b[6+n]=(u8)id;b[7+n]=(u8)(id>>8);
+    /* Install identity before DMA starts, including immediate interrupt reply. */
+    q_slots[slot].received=0;q_slots[slot].id=id;
+    for(attempt=0;attempt<3;attempt++){
+        send_frame(b,finalize_frame(b,n+2));start=g_local_tick_ms;
+        while((u32)(g_local_tick_ms-start)<500){
+            if(DFQueue_Status(id,&process,&notice)){
+                if(notice==0 || notice==0x10 || notice==0x25 || notice==0x27){
+                    q_next=id==65535?1:(u16)(id+1);return id;
+                }
+                if(notice!=0x11){DFQueue_Cancel();return 0;}
+            }
+            delay_ms(1);
+        }
+    }
+    /* Ambiguous send must stop; never assign its ID to different payload. */
+    DFQueue_Cancel();return 0;
+}
+u16 DFQueue_Linear(float x,float y,float speed,float yaw,u8 grade) {
+    float v[4];if(!(speed>0))return 0;
+    v[0]=x;v[1]=y;v[2]=speed;v[3]=yaw;
+    return q_submit(0x64,v,yaw==0?3:4,grade);
+}
+u16 DFQueue_Rotate(float yaw,float omega) {
+    float v[2];if(!(omega>0))return 0;v[0]=yaw;v[1]=omega;return q_submit(0x63,v,2,18);
+}
+u16 DFQueue_Arc(float radius,float yaw,float speed,u8 grade) {
+    float v[3];if(!(radius>0) || speed==0)return 0;
+    v[0]=radius;v[1]=yaw;v[2]=speed;return q_submit(0x66,v,3,grade);
+}
+u8 DFQueue_Wait(u16 id,u32 timeout_ms) {
+    u32 start=g_local_tick_ms,last=start;u8 p,n,i,found=0;
+    for(i=0;i<8;i++)if(id && q_slots[i].id==id)found=1;
+    if(!found || !timeout_ms)return 2;
+    while((u32)(g_local_tick_ms-start)<timeout_ms){
+        if(DFQueue_Status(id,&p,&n) && p==255 && n!=0x11){
+            if(n!=0 && n!=0x27){DFQueue_Cancel();return 3;}
+            for(i=0;i<8;i++)if(q_slots[i].id==id)q_slots[i].id=0;
+            return 1;
+        }
+        if((u32)(g_local_tick_ms-last)>=500){q_manage(5,id);last=g_local_tick_ms;}
+        delay_ms(1);
+    }
+    DFQueue_Cancel();return 2;
+}

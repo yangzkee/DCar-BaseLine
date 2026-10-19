@@ -536,7 +536,8 @@ void DFCom_RxParse(u8 *data, u16 size)
                 break;
 
             case 0x6F:   /* 运动完成/进度回传 */
-                parse_move_progress(B, payload, len);
+                if(B==0x85) DFQueue_Receive(payload,len);
+                else parse_move_progress(B, payload, len);
                 break;
 
             case 0x8C:   /* 状态查询回传 */

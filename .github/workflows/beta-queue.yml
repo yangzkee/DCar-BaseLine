@@ -1,0 +1,12 @@
+name: Beta STM32 queue
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tests/host/run_move_slots_tests.sh
+      - run: sh tests/host/run_queue_tests.sh
+      - run: sh tests/host/run_nuedc_2026_routes_tests.sh

@@ -205,7 +205,7 @@ class RosNodeTests(unittest.TestCase):
         return response.result()
 
     def test_actions_all_wire_commands_and_results(self):
-        node = self.make_bridge(enable_motion_actions=True)
+        node = self.make_bridge(enable_motion_actions=True, motion_protocol="legacy")
         port = self.ports[-1]
         client, Motion = self.action_client()
         try:
@@ -231,7 +231,7 @@ class RosNodeTests(unittest.TestCase):
             client.destroy()
 
     def test_action_cancel_old_reply_quarantine_and_rejection(self):
-        node = self.make_bridge(enable_motion_actions=True)
+        node = self.make_bridge(enable_motion_actions=True, motion_protocol="legacy")
         port = self.ports[-1]
         port.inject(velpos_packet())
         node.tick()
@@ -266,7 +266,7 @@ class RosNodeTests(unittest.TestCase):
             client.destroy()
 
     def test_action_deadline_and_reconnect_do_not_replay(self):
-        node = self.make_bridge(enable_motion_actions=True)
+        node = self.make_bridge(enable_motion_actions=True, motion_protocol="legacy")
         port = self.ports[-1]
         port.inject(velpos_packet())
         node.tick()
@@ -290,7 +290,7 @@ class RosNodeTests(unittest.TestCase):
             client.destroy()
 
     def test_action_cross_next_and_extended_pose(self):
-        node = self.make_bridge(enable_motion_actions=True)
+        node = self.make_bridge(enable_motion_actions=True, motion_protocol="legacy")
         port = self.ports[-1]
         port.inject(velpos_packet())
         node.tick()
@@ -314,3 +314,33 @@ class RosNodeTests(unittest.TestCase):
             self.assertEqual(result.result().result.pose.pose.position.x, 1.0)
         finally:
             client.destroy()
+
+    def test_beta_trajectory_ids_trim_and_duplicate_completion(self):
+        from rclpy.node import Node
+        from rclpy.action import ActionClient
+        from dcaron_interfaces.action import Trajectory
+        from dcaron_interfaces.msg import MotionSegment
+        node=self.make_bridge(enable_motion_actions=True)
+        port=self.ports[-1];port.inject(velpos_packet());node.tick()
+        peer=Node('test_trajectory_client',context=self.context)
+        self.nodes.append(peer);self.executor.add_node(peer)
+        client=ActionClient(peer,Trajectory,'trajectory')
+        try:
+            goal=Trajectory.Goal();goal.timeout=10.0
+            for _ in range(2):
+                row=MotionSegment();row.command=100;row.x=.1;row.speed=.1;row.profile=18
+                goal.segments.append(row)
+            handle=self.send_action(client,goal);self.assertTrue(handle.accepted)
+            self.spin_until(lambda:node.actions.active is not None and node.actions.active['sent'])
+            result=handle.get_result_async()
+            def ack(p,n,i):
+                port.rx.extend(frame(0x6f,0x85,struct.pack('<BBH',p,n,i),151,1));node.tick()
+            ack(16,0x21,6);node.tick();ack(16,0x28,65535);node.tick()
+            ack(0,0x10,65535);node.tick();ack(0,0x10,1)
+            ack(255,0,65535);ack(255,0,65535)
+            ack(254,0x25,1);self.assertFalse(result.done())
+            ack(255,0x27,1);self.spin_until(result.done)
+            self.assertTrue(result.result().result.success)
+            self.assertEqual(result.result().result.completed,2)
+            self.assertEqual(result.result().result.notice,0x27)
+        finally:client.destroy()

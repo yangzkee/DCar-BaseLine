@@ -566,6 +566,11 @@
           <GroupName>HARDWARE</GroupName>
           <Files>
             <File>
+              <FileName>beta_examples.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\HARDWARE\beta_examples.h</FilePath>
+            </File>
+            <File>
               <FileName>DFCom_Tx.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\HARDWARE\DFCom_Tx.c</FilePath>

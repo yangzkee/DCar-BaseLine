@@ -8,6 +8,11 @@ uint8 CROSS_LOCALIZE=129
 uint8 CONST=0
 uint8 TRAPEZOID=1
 uint8 DIST_LOOP=2
+uint8 VERY_LOW=16
+uint8 LOW=17
+uint8 MEDIUM=18
+uint8 HIGH=19
+uint8 VERY_HIGH=20
 uint8 FIRST=0
 uint8 NEXT=1
 uint8 command
@@ -17,6 +22,7 @@ float64 yaw
 float64 speed
 float64 angular_speed
 float64 radius
+# Beta queue mode requires 16..20 (including rotation); use MEDIUM=18.
 uint8 profile
 uint8 mode
 # CROSS_LOCALIZE/NEXT: immediately bind LINEAR or LINEAR_WITH_YAW.

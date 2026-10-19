@@ -12,14 +12,9 @@ fail()
     exit 1
 }
 
-rg -q '^#include "nuedc_2026_routes.h"' "$main_c" \
-    || fail "main.c does not include the 2026 route API"
-rg -q 'delay_ms\(NUEDC_2026_START_DELAY_MS\)' "$main_c" \
-    || fail "main.c does not provide the configured start delay"
-[ "$(rg -c 'Nuedc2026_RunSelectedRoute\(\)' "$main_c")" -eq 1 ] \
-    || fail "main.c must execute the selected route exactly once"
-! rg -q 'Cmd_Move_Linear\( 50|Cmd_Move_Rot\( 15|Cmd_Move_Rot\( -15' "$main_c" \
-    || fail "old linear/rotation regression demo remains in main.c"
+rg -q '^#include "beta_examples.h"' "$main_c" || fail "Beta example entry missing"
+rg -q 'DF_BetaExample\(\)' "$main_c" || fail "Beta example not called"
+! rg -q 'Nuedc2026_RunSelectedRoute\(\)' "$main_c" || fail "Legacy route still executes automatically"
 
 route_source_count=$(rg -c '<FileName>nuedc_2026_routes.c</FileName>' "$project" || true)
 route_header_count=$(rg -c '<FileName>nuedc_2026_routes.h</FileName>' "$project" || true)

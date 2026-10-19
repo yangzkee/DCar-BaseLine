@@ -1,3 +1,4 @@
+#include "beta_examples.h"
 /******************************************************************************
  *
  *   ╔══════════════════════════════════════════════════════════════════════╗
@@ -297,7 +298,6 @@ static void Startup_Diagnose(void)
  * ===========================================================================*/
 int main(void)
 {
-    Nuedc2026Status route_status;
 
     /* ─── 1. 初始化（串口、定时器）─────────────────── */
     System_Init();
@@ -347,32 +347,10 @@ int main(void)
     DFCom_MoveSessionStart();
     printf("[INIT] Motion session ready (A/B slots cleared)\r\n");
 
-    /* ★★★ ODOM 自动打印位置说明 ★★★
-     * --------------------------------------------------------------
-     *  TIM2 在 System_Init() 里被初始化, 之后每 100ms (10Hz) 进入
-     *  TIM2_IRQHandler (DFCom_Print.c:72) 自动调用:
-     *
-     *    VelPos_Print()   ← 默认开 (简化版, 只 yaw+vel+pos)
-     *    // Odom_Print()  ← 默认注释 (全量进阶版, 含 roll/pitch/acc/gyro)
-     *
-     *  ⚠ 想换打印内容: 改 DFCom_Print.c:80~82 那块的注释 (取消 Odom_Print()
-     *                  的注释 / 注释掉 VelPos_Print 都行, 也可以两个同时开)
-     *  ⚠ 想关掉自动打印: 设 g_print_odom_enable = 0 (DFCom_Print.c:29)
-     *  ⚠ 想手动调用一次: 在你自己代码里直接调 VelPos_Print() 或 Odom_Print()
-     * --------------------------------------------------------------*/
-
-    /* ─── 3. 2026 电赛固定路线：延时一次运行，完成后不自动重复 ──────
-     * 修改 nuedc_2026_routes.h 中的 NUEDC_2026_ACTIVE_ROUTE，
-     * 即可在 H 题与 D 题之间切换。路线只使用里程计，不读取光电。
-     */
-    printf("[2026] selected route=%d, start in %lu ms\r\n",
-           (int)NUEDC_2026_ACTIVE_ROUTE,
-           (unsigned long)NUEDC_2026_START_DELAY_MS);
-    delay_ms(NUEDC_2026_START_DELAY_MS);
-    route_status = Nuedc2026_RunSelectedRoute();
-    printf("[2026] route finished, status=%d\r\n", (int)route_status);
-
-    while (1) {
-        delay_ms(1000);
+    /* Beta: select one of the two examples in beta_examples.h. Run once only. */
+    if(DF_BETA_RUN){
+        delay_ms(3000);
+        printf("[BETA] completed=%u\r\n",(unsigned)DF_BetaExample());
     }
+    while(1){delay_ms(1000);}
 }

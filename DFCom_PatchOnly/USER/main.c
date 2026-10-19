@@ -1,3 +1,4 @@
+#include "beta_examples.h"
 /******************************************************************************
  *
  *   ╔══════════════════════════════════════════════════════════════════════╗
@@ -307,54 +308,10 @@ int main(void)
     DFCom_MoveSessionStart();
     printf("[INIT] Motion session ready (A/B slots cleared)\r\n");
 
-    /* ─── 3. 主循环：发指令 + TIM2 自动打 ODOM ────── */
-    while (1)
-    {
-        /* ────────────────────────────────────────────
-         * 示例：走一个 50cm × 50cm 的方块（ROS 坐标系 +X 前 +Y 左）
-         *
-         *   起点 (0, 0)
-         *      ↑ 步骤 1: +X 前进 50cm  → 到 (50, 0)
-         *      ← 步骤 2: +Y 左移 50cm  → 到 (50, 50)
-         *      ↓ 步骤 3: -X 后退 50cm  → 到 (0, 50)
-         *      → 步骤 4: -Y 右移 50cm  → 回到 (0, 0)
-         *
-         * 入门玩法：注释掉 WaitMoveDone，加 delay_ms(3000)
-         * 进阶玩法：用 WaitMoveDone 等小车真到位（当前就是）
-         *
-         * 默认 CM 模式：速度统一 30 cm/s (约 0.3 m/s)
-         * 想改 SI 模式：System_Init 里打开 g_dfcom_unit_mode = DFCOM_UNIT_M
-         *               然后把下面数值改成 0.5f / 0.3f 等
-         *
-         * ★ WaitMoveDone 第二参是任务允许执行的最长时间
-         *   1000 = 最多执行 1 秒；1 秒内提前完成就立即进入下一条，
-         *   1 秒仍未完成就返回 TIMEOUT，下一条运动命令会合法打断它。
-         *   0 才表示永久等待。A/B 交替槽会吞掉上一任务随后到达的终止帧，
-         *   不会把旧任务的 FF 错认成新任务完成。
-         *
-         * ★ WaitMoveDone 第一参 = CMD_xx, 必须跟刚发的指令对应!
-         *   Cmd_Move_Linear         → CMD_LINEAR           (0x64)
-         *   Cmd_Move_LinearWithYaw  → CMD_LINEAR_WITH_YAW  (0x65)
-         *   Cmd_Move_Rot            → CMD_ROT              (0x63)
-         *   Cmd_Move_Arc            → CMD_ARC              (0x66)
-         *   Cmd_Move_Vel            → ★ 别用 WaitMoveDone (没完成回传)
-         * ────────────────────────────────────────────*/
-        /* ★ Cmd_Move_Linear 第 4 参 = profile:
-         *   0 = 匀速 (起停硬, 短距精确到位)
-         *   1 = 加减速 (★ 推荐, 平滑梯形 ramp)
-         */
-        Cmd_Move_Linear( 50,   0,  30, 2);  WaitMoveDone(CMD_LINEAR, 1000);  /* +X 前进，最多执行 1s */
-        Cmd_Move_Linear(  0,  50,  30, 2);  WaitMoveDone(CMD_LINEAR, 1000);  /* +Y 左移，最多执行 1s */
-        Cmd_Move_Linear(-50,   0,  30, 2);  WaitMoveDone(CMD_LINEAR, 1000);  /* -X 后退，最多执行 1s */
-        Cmd_Move_Linear(  0, -50,  30, 2);  WaitMoveDone(CMD_LINEAR, 1000);  /* -Y 右移，最多执行 1s */
-
-        /* 想画整圆？取消注释下面这行（半径 30cm, 圆心角 360°, 20 cm/s, 加减速）：*/
-        // Cmd_Move_Arc(30, 360, 20, 1);  WaitMoveDone(CMD_ARC, 0);
-
-        /* 想原地左转 90°（CCW 逆时针，60 deg/s）？*/
-        // Cmd_Move_Rot( 90, 60);  WaitMoveDone(CMD_ROT, 0);
-
-        /* 想原地右转 90°（CW 顺时针，dyaw 取负）？*/
-        // Cmd_Move_Rot(-90, 60);  WaitMoveDone(CMD_ROT, 0);
+    /* Beta: select one of the two examples in beta_examples.h. Run once only. */
+    if(DF_BETA_RUN){
+        delay_ms(3000);
+        printf("[BETA] completed=%u\r\n",(unsigned)DF_BetaExample());
     }
+    while(1){delay_ms(1000);}
 }

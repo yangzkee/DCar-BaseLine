@@ -1,3 +1,5 @@
+> Beta 连续队列 v6 的字段、任务 ID 与完成语义以 [Beta 通信说明](../../docs/Beta_通信与示例_2026-10-19.md) 为准；下文保留旧协议参考。
+
 # 运动 Action 与轨迹组合（0.2）
 
 同一个 GitHub 仓库包含 STM32F1、Arduino 和 ROS 2 客户端。ROS 目录下分为两个
