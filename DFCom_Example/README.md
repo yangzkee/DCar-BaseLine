@@ -4,6 +4,16 @@
 打开 [USER/Template.uvprojx](USER/Template.uvprojx)，运动代码直接看 [USER/main.c](USER/main.c)。
 这是外部控制板程序，不是小车主控固件。
 
+## 目录
+
+- [编译与接线](#section-1)
+- [怎么启用示例](#section-2)
+- [如何改一个动作](#section-3)
+- [日志和排查](#section-4)
+
+平台选择、函数速查与分层验收标准见[根 README](../README.md)。
+
+<a id="section-1"></a>
 ## 编译与接线
 
 使用 Keil MDK5 / ARM Compiler 5，Target中启用 **Use MicroLIB**。
@@ -19,6 +29,7 @@
 
 串口为3.3V TTL。车端运动前须激活/校准，并支持队列v6。
 
+<a id="section-2"></a>
 ## 怎么启用示例
 
 主函数顶部只有两个运行配置：
@@ -40,6 +51,7 @@
 `DEMO_SPEED_MPS` 控制两条完整路线的请求速度；入门直线单独写为0.06m/s。
 `DEMO_GRADE`默认 `DF_ACCEL_MEDIUM`（18）。只要修改主函数就能看清动作；没有隐藏在头文件中的路线实现。
 
+<a id="section-3"></a>
 ## 如何改一个动作
 
 ```c
@@ -57,6 +69,7 @@ id = DFQueue_Arc(0.30f, 3.1415927f, -0.15f, DF_ACCEL_MEDIUM); /* 倒行半圆 */
 `DFQueue_Wait(id, timeout_ms)`从本次调用开始计时，0无效；返回 `DF_QUEUE_WAIT_DONE` 才能认为该任务成功。
 任务入队、到位微调、最终完成是不同状态，详见 [协议与状态说明](../docs/DFLink-v6.md)。
 
+<a id="section-4"></a>
 ## 日志和排查
 
 - `[INIT] state_reply=... imu_calibrated=... new_velpos_frames=...`：串口回包、校准、遥测是否正常。

@@ -4,6 +4,14 @@
 本目录不提供含缺失依赖的Keil工程文件。`USER/main.c`是集成示例；需要由你的工程提供启动文件、STM32标准库、时钟和系统辅助代码。
 当前运动示例使用队列v6，所有 `DFQueue_*` 参数固定为米、弧度、m/s、rad/s。
 
+## 目录
+
+- [必须接入的部分](#section-1)
+- [初始化与业务入口](#section-2)
+
+平台选择、函数速查与分层验收标准见[根 README](../README.md)。
+
+<a id="section-1"></a>
 ## 必须接入的部分
 
 1. 将 `HARDWARE/DFCom.h`、`DFCom_Tx.c`、`DFCom_Rx.c`、`DFCom_Print.c` 加入工程。
@@ -16,6 +24,7 @@
 USART1车端口460800，PA9 TX → 车RX、PA10 RX ← 车TX、GND共地。
 USART2调试口115200，PA2 TX → USB-TTL RX。车端须支持队列v6、完成激活/校准。
 
+<a id="section-2"></a>
 ## 初始化与业务入口
 
 按 `USER/main.c` 的次序：初始化 → 隔离运动回包 → 发零速 → 等待1000ms → 再发零速 → 状态/VelPos诊断 → 等50ms → 开始接收业务回包 → 成功 `DFQueue_Begin` → 发动作 → 按ID等待。

@@ -4,6 +4,17 @@
 两个包分别是 `dcaron_interfaces`（Motion、Trajectory与MotionSegment定义）和 `dcaron_bridge`（串口桥接、轨迹客户端）。
 这不是Nav2导航器，也不包含车端固件。车端须支持v6且已激活/校准；所有运动参数使用SI单位。
 
+## 目录
+
+- [1. 构建与启动](#section-1)
+- [2. 运行一条或整组动作](#section-2)
+- [3. ROS接口](#section-3)
+- [4. 配置](#section-4)
+- [5. 检查与验证边界](#section-5)
+
+平台选择、函数速查与分层验收标准见[根 README](../README.md)。
+
+<a id="section-1"></a>
 ## 1. 构建与启动
 
 需要已激活的ROS 2环境、Python>=3.10、colcon、pyserial和PyYAML。
@@ -28,6 +39,7 @@ ros2 topic hz /odom
 
 一个串口只由本节点持有，串口助手、直接探测脚本和另一控制板不能同时发送。
 
+<a id="section-2"></a>
 ## 2. 运行一条或整组动作
 
 在桥接终端开启Action，再从另一已加载环境的终端发目标：
@@ -67,6 +79,7 @@ ros2 run dcaron_bridge trajectory_sequence dcaron_bridge/examples/stadium.yaml -
 
 目标字段、完成语义和十字标边界见 [动作说明](docs/motion.md)，报文见 [队列v6协议](../docs/DFLink-v6.md)。
 
+<a id="section-3"></a>
 ## 3. ROS接口
 
 | 接口（未设置namespace时） | 类型 | 说明 |
@@ -82,6 +95,7 @@ ros2 run dcaron_bridge trajectory_sequence dcaron_bridge/examples/stadium.yaml -
 Pro Odom v4为51字节，可提供IMU；`telemetry:=odom`还需要底盘能力/授权。
 frame名改变不会自动旋转数据，当前数据按FLU解释。单一节点持有串口，两个Action互斥；有活动目标时不自动抢占，先取消或等待。
 
+<a id="section-4"></a>
 ## 4. 配置
 
 配置文件为 `dcaron_bridge/config/bridge.yaml`。launch直接接受 `port`、`telemetry`、`enable_cmd_vel`、`enable_motion_actions`、`namespace`、`params_file`。
@@ -95,6 +109,7 @@ Trajectories即使配置为legacy也使用v6；legacy只选择 `/motion` 的无I
 主机看门狗不等于断线硬件看门狗。取消、超时、失联会尝试取消队列和停车，但链路断开时不能确认车端收到。
 重连不会重放旧目标；重新发目标前须确认现场状态和设备队列。
 
+<a id="section-5"></a>
 ## 5. 检查与验证边界
 
 在仓库根目录运行 `python3 tests/run_checks.py`，统一检查文档链接、示例、C客户端、Arduino和不依赖ROS的Python协议测试。

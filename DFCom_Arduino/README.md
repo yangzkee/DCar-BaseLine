@@ -4,6 +4,15 @@
 它未实现STM32/ROS的队列v6；不能把 `DFQueue_*`、profile16..20或轨迹YAML直接套到这里。
 它与其他平台使用相同的DFLink外层帧和ROS REP-103方向，但运动payload和完成回包不同。
 
+## 目录
+
+- [入口与实际运行方式](#section-1)
+- [接线和车端前提](#section-2)
+- [单位和API](#section-3)
+
+平台选择、函数速查与分层验收标准见[根 README](../README.md)。
+
+<a id="section-1"></a>
 ## 入口与实际运行方式
 
 - 库方式：把 `DFCom` 文件夹拷到Arduino的libraries目录，打开 `DFCom/examples/DcarON_Square/DcarON_Square.ino`。
@@ -12,8 +21,10 @@
 
 **两个现有示例上电初始化后都会在loop中重复跑方形**，不像STM32示例默认只诊断、只运行一次。
 实际动作是前进50cm、原地左转90°，重复四次后等1秒，再开始下一圈。
+库版会查询校准状态但仅打印提示，未阻止未校准时运动；单文件版setup不查询校准状态。
 示例没有用wait返回值作为失败门禁；自定义可靠序列应检查返回值，失败就stop并退出本轮，不要照抄为实测成功保证。
 
+<a id="section-2"></a>
 ## 接线和车端前提
 
 | Arduino | 车端 / 调试 |
@@ -28,6 +39,7 @@
 运动前须激活/校准；Odom订阅还需相应能力，教学频率用10Hz，建议不超过50Hz。
 SoftwareSerial调试可能屏蔽中断，避免大量打印造成硬件串口丢字节。
 
+<a id="section-3"></a>
 ## 单位和API
 
 库默认厘米、cm/s、度、度/s；`DFCom.useMeters()`切换米、m/s、弧度、rad/s。
@@ -48,6 +60,12 @@ DFCom.update();            // loop中调用；waitDone内部也会解析回传
 `waitDone(ms)`仅自然完成返回true，超时或中断返回false；0为永久等待，失联也不自行返回。
 超时只结束本地等待，不自动取消车端任务。内部A/B本地槽不能创造车端任务ID，仍无法完全消除丢包后的同类回包歧义。
 `moveVel`无自动终点，必须主动 `stop()`。
+
+首次测试先把loop改为仅调用 `DFCom.update()`（单文件为 `dcarUpdate()`），观察状态和新遥测，避免默认循环直接开始运动。
+库版用 `DFCom.odom.frameCount` 检查帧数增长；单文件读取并清零 `odomFresh`，确认它能再次置1。
+仅看到一圈末尾的位置打印不代表运动成功：原例程忽略等待结果，超时后也会到这行。
+通过标准应包含每条等待成功、实际四次前进50cm与左转90°、一圈后约1秒暂停再重复；物理精度需外部测量和事先约定指标。
+完整测试步骤、API对应表与验收条件见[根README测试章节](../README.md#其他平台测试)。
 
 库API看 [DFCom.h](DFCom/src/DFCom.h)，修改动作看两个示例末尾的setup/loop。
 离线回归统一从仓库根目录执行 `python3 tests/run_checks.py`；真实AVR编译、Flash/RAM和实车行为须在目标环境验证。
