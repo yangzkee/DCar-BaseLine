@@ -1,6 +1,10 @@
 # STM32F103C8T6 完整工程
 
-版本 **0.4.1**，外部控制板程序，使用 DFLink 队列 v6。打开 [USER/Template.uvprojx](USER/Template.uvprojx)，实际运动直接看 [USER/main.c](USER/main.c)。
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
+
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
+
+外部控制板程序，使用 DFLink 队列 v6。打开 [USER/Template.uvprojx](USER/Template.uvprojx)，实际运动直接看 [USER/main.c](USER/main.c)。
 
 ## 目录
 

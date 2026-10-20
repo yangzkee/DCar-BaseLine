@@ -1,6 +1,10 @@
 # DCar ROS 2 客户端
 
-版本 **0.4.1**。电脑串口直连车端DFLink口，默认队列v6。`dcaron_interfaces`定义动作/轨迹消息，`dcaron_bridge`提供串口桥、双流遥测与测试客户端；不包含车端固件，也不是Nav2导航器。
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
+
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
+
+电脑串口直连车端DFLink口，默认队列v6。`dcaron_interfaces`定义动作/轨迹消息，`dcaron_bridge`提供串口桥、双流遥测与测试客户端；不包含车端固件，也不是Nav2导航器。
 
 ## 目录
 

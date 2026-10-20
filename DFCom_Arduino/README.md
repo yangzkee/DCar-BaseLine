@@ -1,6 +1,10 @@
 # Arduino Uno / Nano 客户端
 
-版本 **0.4.1**，目标ATmega328P。使用无任务ID的逐条运动接口，未实现队列v6；接收数据使用SI，与STM32 / ROS方向一致。
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
+
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
+
+目标ATmega328P。使用无任务ID的逐条运动接口，未实现队列v6；接收数据使用SI，与STM32 / ROS方向一致。
 
 ## 目录
 

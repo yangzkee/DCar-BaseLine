@@ -1,5 +1,9 @@
 # STM32 通信核心移植包
 
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
+
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
+
 这里提供与 [完整工程](../DFCom_Example/README.md) 相同的通信核心，**不是独立可编译工程**。
 本目录不提供含缺失依赖的Keil工程文件。`USER/main.c`是集成示例；需要由你的工程提供启动文件、STM32标准库、时钟和系统辅助代码。
 当前运动示例使用队列v6，所有 `DFQueue_*` 参数固定为米、弧度、m/s、rad/s。
