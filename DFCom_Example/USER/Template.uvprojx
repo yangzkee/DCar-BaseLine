@@ -187,7 +187,7 @@
             <hadIRAM2>0</hadIRAM2>
             <hadIROM2>0</hadIROM2>
             <StupSel>8</StupSel>
-            <useUlib>0</useUlib>
+            <useUlib>1</useUlib>
             <EndSel>0</EndSel>
             <uLtcg>0</uLtcg>
             <nSecure>0</nSecure>
@@ -386,16 +386,6 @@
               <FilePath>.\main.c</FilePath>
             </File>
             <File>
-              <FileName>nuedc_2026_routes.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\nuedc_2026_routes.c</FilePath>
-            </File>
-            <File>
-              <FileName>nuedc_2026_routes.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>.\nuedc_2026_routes.h</FilePath>
-            </File>
-            <File>
               <FileName>stm32f10x_it.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\stm32f10x_it.c</FilePath>
@@ -566,20 +556,15 @@
           <GroupName>README</GroupName>
           <Files>
             <File>
-              <FileName>README.TXT</FileName>
+              <FileName>README.md</FileName>
               <FileType>5</FileType>
-              <FilePath>..\README.TXT</FilePath>
+              <FilePath>..\README.md</FilePath>
             </File>
           </Files>
         </Group>
         <Group>
           <GroupName>HARDWARE</GroupName>
           <Files>
-            <File>
-              <FileName>beta_examples.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\HARDWARE\beta_examples.h</FilePath>
-            </File>
             <File>
               <FileName>DFCom_Tx.c</FileName>
               <FileType>1</FileType>

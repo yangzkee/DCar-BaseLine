@@ -1,50 +1,14 @@
-/*****************************************************************************
- * DFCom_Rx.c - 接收侧实现（SI 单位 / ROS REP-103 坐标系）
- * ---------------------------------------------------------------------------
- * 功能：从 USART1 IDLE 中断收到 DcarON 回传的字节流，做帧定界 + 校验和 +
- *       按 (A, B) 分发到对应解析函数，把数据写到 g_odom / g_move_status /
- *       g_dcar_state 等全局变量供应用层读取。
- *
- *
- * ★★ DF_Link 回传帧总格式（与发送帧地址顺序相反！）★★
- *
- *   字节  内容                           说明
- *   ────  ─────────────────────────      ──────────────────────────────────
- *   [0]   0xDF                           固定帧头
- *   [1]   Target_ID = 0x97               目标地址（=PC_ID，我们这一端）
- *   [2]   Robot_ID  = 0x01               源地址（小车 ID）
- *   [3]   A                              回传类（见下表）
- *   [4]   B                              子码
- *   [5]   LEN
- *   [6..LEN+5]   payload
- *   [LEN+6]      0xFD
- *   [LEN+7/8]    checksum_lo / hi
- *
- *
- * ★★ 本库会解析的 4 种回传 ★★
- *
- *   A      B        含义                                  小车端发起位置
- *   ────   ──────   ──────────────────────────────────    ─────────────────────────
- *   0x6C   0x80     Odom v4 全量帧 (51B payload)          DF_CoreState.c::DF_Send_odom
- *   0x6C   0x81     VelPos v2 简化帧 (35B payload)        DF_CoreState.c::DF_Send_vel_pose
- *   0x6F   *        运动完成回传 (ProgressBack, 2B)       DF_CoreFlag.c::DF_Flag_Back
- *                   payload = [Process(0xFF=完成), Notice]
- *   0x8C   0x40     激活/校准状态 (12B payload)           DF_CoreDate.c::DF_DcarParmState
- *                   ifIMUcali / ifFinetune / IMU 参数 / 控制 Par
- *   0x46   *        IMU 校准完成 (本库不主动用)           DF_CoreFlag.c
- *
- *
- * ★★ 坐标系约定（ROS REP-103）★★
- *
- *    +X = 前进 (forward)         g_odom.n_pos_x_m, b_vel_x_mps
- *    +Y = 左方 (left)            g_odom.n_pos_y_m, b_vel_y_mps
- *    +Yaw = CCW (逆时针)         g_odom.yaw_rad (单位 rad, 协议层 SI rad s32×10000)
- *
- *    与老协议相比：+X/+Y 含义对调 + Yaw 正负反转 + 单位 deg→rad。
- *****************************************************************************/
+/* DCar串口接收与状态分发。
+ * DFCom_RxParse保存跨调用残帧，校验地址/帧尾/累加和，处理噪声与多帧。
+ * 遥测：0x6C/0x80全量Odom、0x6C/0x81标准VelPos。
+ * 队列：0x6F/0x85含任务ID，状态交给Tx中的队列模块。
+ * 无ID运动：0x6F/0x63..66使用本文件A/B本地槽；它们不等于车端任务ID。
+ * 状态：0x8C/0x40含校准与控制参数。解析数据保存为SI，不受单位开关影响。
+ */
 #include "DFCom.h"
 #include "usart.h"
 #include "delay.h"
+#include <string.h>
 
 /* ===========================================================================
  * 全局数据存储 —— 应用层直接读
@@ -56,7 +20,7 @@ volatile DcarState_t  g_dcar_state   = {0};
 
 #define MOVE_SLOT_NONE  0xFF
 
-/* 运动任务只保留“当前槽 + 旧槽丢弃器”这两个角色。 */
+/* 无ID运动任务使用“当前槽 + 旧槽丢弃器”；队列v6状态在Tx中按ID维护。 */
 static volatile u8 g_move_current_slot    = MOVE_SLOT_NONE;
 static volatile u8 g_move_discard_slot    = MOVE_SLOT_NONE;
 static volatile u8 g_move_discard_cmd     = 0;
@@ -462,155 +426,93 @@ static void parse_dcar_state(const u8 *payload, u8 payload_len)
 }
 
 
-/*============================================================================
- *  协议解析入口 DFCom_RxParse
- *  ──────────────────────────────────────────────────────────────────────────
- *  USART1 IDLE 中断（usart.c::USART1_IRQHandler）每收到一组数据后调用此函数。
- *
- *  算法：
- *    1. 在 data[] 里找 0xDF 帧头
- *    2. 校验 [1]=PC_ID, [2]=Robot_ID (回传帧地址顺序)
- *    3. 读 LEN，计算 tail 位置，检查 0xFD
- *    4. 累加校验和，与帧末 u16 LE 比较
- *    5. 按 A 字段分发到对应 parse_* 函数
- *    6. 跳到下一帧（一次中断可能收到多帧粘连，循环处理）
- *============================================================================*/
+/* 按完整且已验证的帧分发。队列回包与无ID回包使用不同B值。 */
+static void dispatch_frame(const u8 *frame)
+{
+    u8 a = frame[3];
+    u8 b = frame[4];
+    u8 length = frame[5];
+    const u8 *payload = frame + 6;
+    if (a == 0x6C) {
+        if (b == 0x80) parse_odom_v4(payload, length);
+        else if (b == 0x81) parse_velpos_v2(payload, length);
+    } else if (a == 0x6F) {
+        if (b == 0x85) DFQueue_Receive(payload, length);
+        else parse_move_progress(b, payload, length);
+    } else if (a == 0x8C && b == 0x40) {
+        parse_dcar_state(payload, length);
+    }
+}
+
+/* 串口字节流入口，不把一次IDLE中断当作一帧。
+ * 保存不完整帧；校验后可一次分发多帧。缓存固定128字节，接受payload<=60。
+ * 扫描后续候选，坏LEN不会一直挡住它后面的有效帧。仅由接收上下文调用。
+ */
 void DFCom_RxParse(u8 *data, u16 size)
 {
-    /* ★ size 必须 u16: buffer 现在是 256B (USART1_RX_BUFF_SIZE), u8 容不下 */
-    u16 pos = 0;
-    u8 iter = 0;
-    const u8 MAX_ITER = 20;   /* 防止恶意数据导致死循环 */
+    static u8 stream[128];
+    static u16 used;
+    u16 input;
+    u16 header;
+    u16 incomplete;
+    u16 total;
+    u16 sum;
+    u16 received_sum;
+    u16 i;
+    u8 length;
+    u8 found;
 
-    while (pos < size && iter < MAX_ITER) {
-        u16 hdr;
-        u8 A, B, len;
-        u16 tail_pos;
-        u16 sc;
-        u16 sc_recv;
-        u8 sum_len;
-        u8 i;
-        const u8 *payload;
-
-        iter++;
-
-        /* 1. 找帧头 0xDF */
-        hdr = pos;
-        while (hdr < size && data[hdr] != DFCOM_FRAME_HEADER) hdr++;
-        if (hdr >= size) break;
-
-        /* 2. 至少要 9 字节才可能是完整帧（DF + 5 字段头 + FD + 2 校验） */
-        if (hdr + 8 >= size) break;
-
-        /* 3. 回传帧地址：[1]=Target_ID(PC_ID), [2]=Robot_ID */
-        if (data[hdr + 1] != DFCOM_PC_ID || data[hdr + 2] != DFCOM_ROBOT_ID) {
-            pos = hdr + 1;  /* 不是给我们的帧，跳过 */
-            continue;
+    for (input = 0; input < size; input++) {
+        if (used == sizeof(stream)) {
+            memmove(stream, stream + 1, --used);
         }
-
-        A   = data[hdr + 3];
-        B   = data[hdr + 4];
-        len = data[hdr + 5];
-
-        /* 4. 长度合理性 */
-        if (len > 60) { pos = hdr + 1; continue; }
-
-        /* 5. 边界 + 帧尾 */
-        tail_pos = hdr + 6 + len;
-        if (tail_pos + 2 >= size) break;   /* 帧不完整，等下次中断 */
-        if (data[tail_pos] != DFCOM_FRAME_TAIL) { pos = hdr + 1; continue; }
-
-        /* 6. 校验和（从帧头到帧尾全部累加） */
-        sc = 0;
-        sum_len = len + 7;
-        for (i = 0; i < sum_len; i++) sc += data[hdr + i];
-        sc_recv = (u16)data[tail_pos + 1] | ((u16)data[tail_pos + 2] << 8);
-        if (sc != sc_recv) { pos = hdr + 1; continue; }
-
-        /* 7. 校验通过 → 按 A 分发 */
-        payload = &data[hdr + 6];
-        switch (A) {
-            case 0x6C:   /* 周期数据回传 */
-                if (B == 0x80) parse_odom_v4(payload, len);    /* Odom v4 全量 51B */
-                else if (B == 0x81) parse_velpos_v2(payload, len); /* VelPos v2 简化 35B */
+        stream[used++] = data[input];
+        do {
+            found = 0;
+            incomplete = used;
+            for (header = 0; header < used; header++) {
+                if (stream[header] != DFCOM_FRAME_HEADER) continue;
+                if (used - header < 3) {
+                    if (header < incomplete) incomplete = header;
+                    continue;
+                }
+                if (stream[header+1] != DFCOM_PC_ID || stream[header+2] != DFCOM_ROBOT_ID) continue;
+                if (used - header < 6) {
+                    if (header < incomplete) incomplete = header;
+                    continue;
+                }
+                length = stream[header+5];
+                if (length > 60) continue;
+                total = (u16)length + 9;
+                if (used - header < total) {
+                    if (header < incomplete) incomplete = header;
+                    continue;
+                }
+                if (stream[header+total-3] != DFCOM_FRAME_TAIL) continue;
+                sum = 0;
+                for (i = 0; i < total - 2; i++) sum += stream[header+i];
+                received_sum = (u16)stream[header+total-2] | ((u16)stream[header+total-1] << 8);
+                if (sum != received_sum) continue;
+                dispatch_frame(stream + header);
+                used -= header + total;
+                memmove(stream, stream + header + total, used);
+                found = 1;
                 break;
-
-            case 0x6F:   /* 运动完成/进度回传 */
-                if(B==0x85) DFQueue_Receive(payload,len);
-                else parse_move_progress(B, payload, len);
-                break;
-
-            case 0x8C:   /* 状态查询回传 */
-                if (B == 0x40) parse_dcar_state(payload, len);
-                break;
-
-            case 0x46:   /* IMU 校准回传 —— 本库不用 */
-                break;
-
-            default:
-                /* 其他类型（电池/版本/参数查询等）暂不解析 */
-                break;
-        }
-
-        /* 8. 跳到下一帧 */
-        pos = tail_pos + 3;
+            }
+            if (!found) {
+                /* 丢弃噪声，只保留最早的可能残帧；没有候选则清空。 */
+                used -= incomplete;
+                memmove(stream, stream + incomplete, used);
+            }
+        } while (found);
     }
 }
 
 
-/*============================================================================
- *  可选辅助：阻塞等待运动完成
- *  ──────────────────────────────────────────────────────────────────────────
- *  ★ 必读 ★ —— 第一个参数 (cmd_code) 必须跟你刚发的指令配对!
- *
- *  发的函数                     →  WaitMoveDone 第一参填什么
- *  -----------------------------    ---------------------------------
- *  Cmd_Move_Linear(...)         →  CMD_LINEAR           (0x64)
- *  Cmd_Move_LinearWithYaw(...)  →  CMD_LINEAR_WITH_YAW  (0x65)
- *  Cmd_Move_Rot(...)            →  CMD_ROT              (0x63)
- *  Cmd_Move_Arc(...)            →  CMD_ARC              (0x66)
- *  Cmd_Move_Vel(...)            →  ★ 不要用 WaitMoveDone ★
- *                                  (持续速度没有完成回传, 等不到)
- *
- *  填错不会去读别的任务槽，而是立即返回 MOVE_WAIT_TIMEOUT。
- *
- *  ──────────────────────────────────────────────────────────────────────────
- *  ★ 第二个参数 (timeout_ms) ★
- *
- *  timeout_ms == 0  → 永久等待；链路失联时也不会自行返回。
- *
- *  timeout_ms > 0   → 这条任务允许执行的【最长时间】。
- *                     若 DCar 提前完成，收到本任务 FF/00 后立即返回 DONE；
- *                     到达时限仍未完成，立即返回 TIMEOUT。调用者随后发送的
- *                     下一条运动命令会按协议合法打断上一条。
- *
- *  A/B 槽如何防止旧终止帧误伤下一条：
- *    - 相邻任务强制使用不同槽；
- *    - 超时任务的槽降级为“旧槽丢弃器”，只吞帧，不保存状态；
- *    - 旧任务唯一的 0xFF 终止帧只负责释放旧槽，不会完成新任务；
- *    - 到 N+2 轮回时无条件清空复用，即使客户端丢过旧终止帧也不永久占槽。
- *
- *  ──────────────────────────────────────────────────────────────────────────
- *  ★ 返回值 ★
- *
- *  返回 MOVE_WAIT_DONE        → 自然完成 (progress=0xFF + notice=0x00)
- *  返回 MOVE_WAIT_TIMEOUT     → 超时、发送失败或未绑定到最近任务
- *  返回 MOVE_WAIT_INTERRUPTED → 被打断 (progress=0xFF + notice!=0x00)
- *
- *  progress=0xFF 只是“任务终止”，notice 才决定结果：
- *    last_notice=0x00 → 自然完成 (车真的到位了)
- *    last_notice=0x01 → 任务被拒绝 (版本不支持或参数非法)
- *    last_notice=0x0A → 被遥控器接管
- *    last_notice=0x62~0x66 → 被对应的新运动指令打断
- *
- *  ──────────────────────────────────────────────────────────────────────────
- *  ★ 用法示例 ★
- *
- *    Cmd_Move_Linear(50, 0, 30, 2);       // CM 模式：前进 50cm
- *    WaitMoveDone(CMD_LINEAR, 1000);       // 最多跑 1s；提前完成就提前返回
- *    Cmd_Move_Linear(-50, 0, 30, 2);      // 到点后打断上一条，或自然接续
- *    WaitMoveDone(CMD_LINEAR, 1000);
- *============================================================================*/
+/* 无ID运动的本地阻塞等待，当前main的队列示例不调用它。
+ * 绑定最近已发送的同cmd任务；0无限等，正时限到达只结束等待，不发送停车。
+ * 返回DONE/TIMEOUT/INTERRUPTED；无ID协议仍有丢包后同类迟到回包的身份歧义。
+ */
 u8 WaitMoveDone(u8 cmd_code, u32 timeout_ms)
 {
     u8 slot;
@@ -677,25 +579,8 @@ u8 WaitMoveDone(u8 cmd_code, u32 timeout_ms)
                 return MOVE_WAIT_TIMEOUT;
             }
         }
-        /*===== 低功耗优化建议 (高级, 当前未启用) ======================================
-         * 下面这行 delay_ms(10) 是 SysTick 忙等待, 等待期间 CPU 一直在自旋,
-         * 浪费功耗 + 占住 CPU 不能干别的事。
-         *
-         * 如果你想让 CPU 在等待期间睡眠 (省电 + 让出 CPU 给其他任务), 把
-         *      delay_ms(10);
-         * 替换为下面这一行:
-         *      __WFI();    // Wait For Interrupt, ARM Cortex-M 标准指令
-         *
-         * 原理: __WFI() 让 CPU 立刻进入睡眠, 任何中断 (SysTick 1ms / USART RX)
-         *       都会自动唤醒。 这样 CPU 占用从 ~100% 降到 ~0.1%, 行为完全一致。
-         *
-         * 注意: 进入 __WFI 前必须确保 SysTick + USART RX 中断已启用 (默认就是这样,
-         *       不用改); 不要在 __disable_irq() 之后调 __WFI, 否则永远醒不来。
-         *
-         * 我们当前保留 delay_ms(10) 是因为这版例程优先考虑简单易懂, 用户可按需切换。
-         *===========================================================================*/
+        /* 无ID等待每10ms检查一次；保持串口与tick中断运行。 */
         delay_ms(10);
-        //__WFI(); 
     }
 }
 

@@ -2,4 +2,5 @@
 - command: ROTATE
   yaw: 0.2617993877991494
   angular_speed: 0.2
+  profile: 18
   timeout: 8.0

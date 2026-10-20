@@ -77,6 +77,7 @@ def main():
             client = ActionClient(peer, Motion, 'motion')
             spin_until(client.server_is_ready, 5)
             goal = Motion.Goal()
+            goal.profile = Motion.Goal.MEDIUM  # Queue validation requires an explicit grade.
             goal.command = Motion.Goal.ROTATE
             goal.yaw, goal.angular_speed, goal.timeout = math.radians(options.degrees), options.rate, 8.0
             log('goal', requested_degrees=options.degrees, angular_speed=options.rate)

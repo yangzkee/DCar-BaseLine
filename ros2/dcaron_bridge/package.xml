@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>dcaron_bridge</name>
-  <version>0.3.0</version>
+  <version>0.3.1</version>
   <description>Lightweight DFLink V3 serial bridge for DcarON.</description>
   <maintainer email="220290149+yangzkee@users.noreply.github.com">yangzkee</maintainer>
   <license>Proprietary</license>

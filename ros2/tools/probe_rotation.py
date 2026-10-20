@@ -1,4 +1,4 @@
-"""Direct DFLink test. No ROS required; motion only with explicit --degrees.
+"""Direct DFLink queue v6 test. No ROS required; motion only with explicit --degrees.
 
 Run from repository: python ros2/tools/probe_rotation.py --port COM5 --degrees 15
 """
@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
-import struct
 import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'dcaron_bridge'))
 from dcaron_bridge.protocol import Parser, decode, frame, subscribe, velocity
+from dcaron_bridge.motion import MotionSpec
+from dcaron_bridge.queue import QueueClient
 import serial
 
 
@@ -75,20 +76,20 @@ def main():
                     raise RuntimeError('No valid VelPos v2 received; motion NOT sent')
                 before = after
                 if options.degrees:
-                    payload = struct.pack('<ii', int(math.radians(options.degrees) * 10000),
-                                          int(options.rate * 10000))
-                    sent_motion = True  # Also stop after a potentially partial write.
-                    send(frame(2, 0x63, payload), 'relative rotation')
+                    queue = QueueClient([
+                        MotionSpec(0x63, yaw=math.radians(options.degrees),
+                                   angular_speed=options.rate, profile=18)
+                    ], lambda data: send(data, 'queue v6 handshake/task/query'))
+                    sent_motion = True  # Cleanup also covers an ambiguous partial send.
                     deadline = time.monotonic() + options.timeout
-                    while time.monotonic() < deadline and terminal is None:
+                    while time.monotonic() < deadline and not queue.done:
+                        queue.tick(time.monotonic())
                         for packet in receive():
-                            if packet.a == 0x6F and packet.b == 0x63 and len(packet.payload) == 2:
-                                if packet.payload[0] == 255:
-                                    terminal = packet.payload[1]
-                    if terminal is None:
-                        log('timeout', message='No rotation terminal frame; stopping')
-                    elif terminal != 0:
-                        log('motion_failed', notice=terminal)
+                            queue.receive(packet)
+                    if queue.done:
+                        terminal = queue.final_notice
+                    else:
+                        log('timeout', message='No queue terminal result; stopping')
                     # Keep observing settling briefly, then force zero in cleanup.
                     deadline = time.monotonic() + 0.5
                     while time.monotonic() < deadline:
@@ -101,7 +102,10 @@ def main():
             finally:
                 if sent_motion:
                     try:
-                        send(velocity(0, 0, 0), 'final stop')
+                        try:
+                            send(frame(2, 0x85, b'\x04'), 'cancel queue')
+                        finally:
+                            send(velocity(0, 0, 0), 'final stop')
                     except (OSError, serial.SerialException) as exc:
                         cleanup_ok = False
                         log('stop_failed', message=str(exc))
@@ -110,13 +114,13 @@ def main():
                 except (OSError, serial.SerialException) as exc:
                     cleanup_ok = False
                     log('unsubscribe_failed', message=str(exc))
-    except (OSError, serial.SerialException, RuntimeError, ValueError) as exc:
+    except (OSError, serial.SerialException, RuntimeError, ValueError, TimeoutError) as exc:
         log('error', message=str(exc))
         return 1
     finally:
         options.log.parent.mkdir(parents=True, exist_ok=True)
         options.log.write_text('\n'.join(json.dumps(row, ensure_ascii=False) for row in records) + '\n', encoding='utf-8')
-    return 0 if cleanup_ok and (not options.degrees or terminal == 0) else 1
+    return 0 if cleanup_ok and (not options.degrees or terminal in (0, 0x27)) else 1
 
 
 if __name__ == '__main__':

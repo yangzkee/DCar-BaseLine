@@ -5,6 +5,7 @@ uint8 LINEAR_WITH_YAW=101
 uint8 ARC=102
 uint8 CROSS_RECORD=128
 uint8 CROSS_LOCALIZE=129
+# Untagged motion_protocol=legacy only:
 uint8 CONST=0
 uint8 TRAPEZOID=1
 uint8 DIST_LOOP=2
@@ -22,7 +23,7 @@ float64 yaw
 float64 speed
 float64 angular_speed
 float64 radius
-# Beta queue mode requires 16..20 (including rotation); use MEDIUM=18.
+# Queue v6 mode requires 16..20 (including rotation); use MEDIUM=18.
 uint8 profile
 uint8 mode
 # CROSS_LOCALIZE/NEXT: immediately bind LINEAR or LINEAR_WITH_YAW.

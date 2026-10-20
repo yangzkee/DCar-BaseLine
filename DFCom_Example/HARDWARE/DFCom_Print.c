@@ -2,13 +2,13 @@
  * DFCom_Print.c - 终端打印 + 本地 tick
  * ---------------------------------------------------------------------------
  * 提供两个东西：
- *   1. g_local_tick_ms：本地毫秒计数（TIM2 1ms 中断维护，给 WaitMoveDone 等用）
- *   2. Odom_Print()：把 g_odom 打到 USART2（printf 已重定向到 USART2）
+ *   1. g_local_tick_ms：本地毫秒计数（TIM2 1ms 中断维护，给队列超时等用）
+ *   2. VelPos_Print()：把 g_velpos 打到 USART2（printf 已重定向到 USART2）
  *      TIM2 计数到 100ms 时自动调用一次（10Hz 刷屏）
  *
- * TIM2 中断：72MHz / 7200 = 10kHz 计数器，1ms 一次中断
+ * TIM2 中断：72MHz / 72 / 1000 = 1kHz，标称1ms一次中断
  *   - 每次中断 g_local_tick_ms++
- *   - 每 100 次中断（100ms） Odom_Print() 一次
+ *   - 每100次中断打印一次VelPos；printf耗时会影响本地tick精度
  *
  * 学生在 USART2（USB-TTL 接 PC）终端看到的输出（坐标系 ROS REP-103）：
  *   X(fwd) = +X 前进方向 (m)        Y(left) = +Y 左方 (m)
@@ -31,8 +31,8 @@ volatile u8 g_print_odom_enable = 1;
 /* ===========================================================================
  * TIM2 初始化：1ms 中断
  *   APB1 = 36MHz, TIM2 计数频率 = 72MHz / Prescaler
- *   设 Prescaler = 7200 - 1, Period = 10 - 1 → 10kHz/10 = 1kHz = 1ms
- *   (或者 Prescaler=72-1, Period=1000-1，也是 1ms，原理一样)
+ *   实际Prescaler=72-1，Period=1000-1，1MHz/1000=1kHz
+ *   当前printf在TIM2中断内执行，tick不是独立的精密墙钟。
  * ===========================================================================*/
 void Odom_PrintTimer_Init(void)
 {
@@ -63,7 +63,7 @@ void Odom_PrintTimer_Init(void)
 
 /* ===========================================================================
  * TIM2 中断服务 —— 每 1ms 一次
- *   1. g_local_tick_ms++ (给 WaitMoveDone 等用)
+ *   1. g_local_tick_ms++ (给队列超时等用)
  *   2. 每 100ms (= 10Hz) 调一次打印
  *
  * ★ 默认打印 VelPos (初学者版, 字段少看起来清爽)
@@ -112,11 +112,11 @@ void TIM2_IRQHandler(void)
  *
  * ★ 调用方式
  *   订阅: send Cmd_Subscribe_VelPos(...) → 点亮 VelPos v2 简化帧
- *   收到至少一帧才会打印 (frame_count > 0), 避免开机刷一堆 0。
+ *   未收到首帧时打印no data提示；此后打印最近一次数据与累计帧数。
  * ===========================================================================*/
 void VelPos_Print(void)
 {
-    /* 取一份"瞬时快照", 避免中断期间被改写产生撕裂 */
+    /* 逐字段复制最近值；高优先级USART可抢占，此快照不保证整帧原子性 */
     VelPosData_t snap;
     snap.yaw_rad      = g_velpos.yaw_rad;
     snap.n_pos_x_m    = g_velpos.n_pos_x_m;    /* N 系: 累积位置 (m) */

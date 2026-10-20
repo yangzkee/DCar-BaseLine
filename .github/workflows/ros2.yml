@@ -21,12 +21,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: python -m pip install "PyYAML>=6,<7"
       - name: Protocol regression tests (no ROS installation)
         working-directory: ros2/dcaron_bridge
         run: |
           python -m unittest discover -s test -p test_protocol.py -v
           python -m unittest discover -s test -p test_motion.py -v
           python -m unittest discover -s test -p test_queue.py -v
+          python -m unittest discover -s test -p test_trajectory.py -v
 
   ros-runtime:
     runs-on: ubuntu-latest
@@ -36,7 +38,7 @@ jobs:
       - name: Install test and transport dependencies
         run: |
           apt-get update
-          apt-get install -y python3-serial python3-pytest python3-colcon-common-extensions
+          apt-get install -y python3-serial python3-yaml python3-pytest python3-colcon-common-extensions
       - name: Build installed package and verify real ROS topics
         shell: bash
         working-directory: ros2
