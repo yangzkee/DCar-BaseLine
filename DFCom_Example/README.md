@@ -1,60 +1,57 @@
 # STM32F103C8T6 完整工程
 
-当前运动接口是 **DFLink队列v6**，固定使用米、弧度、m/s、rad/s。
-打开 [USER/Template.uvprojx](USER/Template.uvprojx)，运动代码直接看 [USER/main.c](USER/main.c)。
-这是外部控制板程序，不是小车主控固件。
+版本 **0.4.1**，外部控制板程序，使用 DFLink 队列 v6。打开 [USER/Template.uvprojx](USER/Template.uvprojx)，实际运动直接看 [USER/main.c](USER/main.c)。
 
 ## 目录
 
-- [编译与接线](#section-1)
-- [自动循环测试](#section-2)
-- [如何改一个动作](#section-3)
-- [日志和排查](#section-4)
+- [编译、下载与接线](#编译下载与接线)
+- [自动操场循环](#自动操场循环)
+- [收帧、日志与独立功能](#收帧日志与独立功能)
+- [诊断与验收](#诊断与验收)
 
-平台选择、函数速查与分层验收标准见[根 README](../README.md)。
+## 编译、下载与接线
 
-<a id="section-1"></a>
-## 编译与接线
+使用 Keil MDK5 / ARM Compiler 5，启用 Use MicroLIB。工程目标 STM32F103C8，Flash `0x08000000/0x10000`，RAM `0x20000000/0x5000`。
+在 Debug / Utilities 选择自己的下载器和 SWD，使用与实物芯片相符的配置；BOOT0=0、建议 BOOT1=0。工程不绑定个人 ST-Link 序列号。
 
-使用 Keil MDK5 / ARM Compiler 5，Target中启用 **Use MicroLIB**。
-板卡为STM32F103C8T6；工程的标准库、启动文件和系统时钟已包含。
-
-| STM32引脚 | 连接 | 波特率 |
+| 引脚 | 连接 | 参数 |
 |---|---|---|
-| PA9 / USART1 TX | 车端DFLink RX | 460800，8N1 |
-| PA10 / USART1 RX | 车端DFLink TX | 460800，8N1 |
-| GND | 车端GND | 必须共地 |
-| PA2 / USART2 TX | USB-TTL RX | 115200，8N1，printf终端 |
-| GND | USB-TTL GND | 必须共地 |
+| PA9 / PA10 | USART1 TX→车 RX、RX←车 TX，GND 共地 | 460800，8N1，3.3V TTL |
+| PA2 | USART2 TX→USB-TTL RX，GND 共地 | 115200，8N1，printf 日志 |
 
-串口为3.3V TTL。车端运动前须激活/校准，并支持队列v6。
+车端应先激活 / 校准，并支持队列 v6。本例程自动运动，需要全向 / 麦克纳姆底盘和可运行操场的场地。
 
-<a id="section-2"></a>
-## 自动循环测试
+## 自动操场循环
 
-无需启用开关：编译烧录后，程序自动诊断、倒计时3秒，持续循环操场路线。
-没有 `DEMO_ENABLE_MOTION` 或 `DEMO_ROUTE`，不用切换模式，也不用每圈复位。
-正常完成一圈后立即下一圈，无额外圈间等待；故障会取消/零速并停止后续循环。
-需要全向/麦克纳姆底盘，程序启动后即可能运动。
+烧录后无须改模式或运动开关。上电两次零速之间等待1000ms，独立订阅Odom和VelPos（间隔20ms），固定观察500ms，等待50ms启用业务会话，再倒计时3000ms。
+状态 / 遥测缺失只报告，不延长观察窗口、不阻止运动；队列能力、空闲状态、ACK、DONE和超时仍必须通过。
 
-<a id="section-3"></a>
-## 如何改一个动作
+每圈连续入队四条：半径0.30m倒行半圆 → 后退0.60m → 同样倒行半圆 → 后退0.60m同时转2π。速度请求0.15m/s，加速度档位18。
+四条均成功后立即开始下一圈，无圈间延时，无人工触发。每次Wait上限60000ms，从本次调用计时。
+失败打印 `FAILED stage=begin/submit/wait`，尝试取消 / 零速后停止新任务，继续收帧。排除故障后复位。
+具体动作和物理测量标准见[根README验收表](../README.md#验收标准)。
 
-四条实际调用均在main内：倒行半圆R=0.30m、转角π、速度-0.15m/s；后退0.60m；同样倒行半圆；后退0.60m同时旋转2π。
-参数固定米、弧度、m/s、rad/s，中档加速度18。修改main中的参数即可，不另设路线模式。
-每圈连续提交4个ID，再按ID等待；全部成功后开始下一圈。
-完整API、四段验收表和日志见[根README](../README.md#stm32测试)。
+## 收帧、日志与独立功能
 
-<a id="section-4"></a>
-## 日志和排查
+USART1用1024字节循环DMA持续接收；DMA TC中断记录环回，USART错误中断记录错误，主循环 `DFCom_Poll()` 调用 `USART1_ReceivePoll()` 分块解析。解析期间DMA保持接收。
+TIM2只维护1ms tick，不打印、不解析。主循环和等待循环调用 Poll；默认延时每5ms服务，队列等待每1ms服务。
+USART2使用2048字节非阻塞发送环和TXE中断；满时丢日志并累计 `g_usart2_log_dropped`，不会等待日志端。
 
-- `[INIT]`：state_reply=1、imu_calibrated=1、new_velpos_frames>0 才通过启动诊断。
-- `[LAP] START n` / `[LAP] DONE n`：圈号持续递增，每圈4条任务全部成功。
-- `[QUEUE] ... segment=n/4 ... DONE notice=...`：逐段完成结果；ACK不是完成。
-- `[DEMO] FAILED stage=begin/submit/wait`：本次失败，尝试取消/零速后不再发新路线。
-- `[VELPOS]`：基础位置与速度；fr应增长。`NO FRESH DATA`为缺失/超过本地1秒未更新，不能算通信通过。
-- `[ODOM]`：启动自动尝试订阅；最近本地1秒内有更新时，与VelPos一起打印；不可用时自动保留VelPos，恢复后自动重新打印。
+main默认开启Odom订阅、VelPos订阅、状态查询和日志，四项独立。关闭任一订阅或日志不会停止运动；日志关闭也必须继续Poll收帧。
+日志总开关为 `g_print_odom_enable`，`g_print_velpos_enable/g_print_full_odom_enable` 分别控制两种输出。这些是业务定制入口，运行现成测试无需修改。
 
-无需手动切换Odom/VelPos。Odom可用时两种帧计数均应增长，Odom额外提供IMU数据。
-TIM2维护tick并打印，printf耗时会影响本地计时精度；遥测新鲜度不是硬件看门狗。串口断开时不能保证取消/停车请求送达。
-软件DONE只证明车端报告成功；实车各段轨迹、旋转与多圈误差仍须外部测量，验收项目见根README。
+`g_odom` 与 `g_velpos` 分别保存真实数据；不会交替订阅或复制另一种数据作为本流。Odom最近1秒有更新时与VelPos一起打印，Odom缺失只用VelPos；VelPos超时显示 `NO FRESH DATA`。
+解析与打印均在主循环，串口IRQ只处理硬件状态。不要在ISR再次喂同一串字节。
+
+## 诊断与验收
+
+- `[INIT]`：状态、校准和两类帧数，仅报告。
+- `[QUEUE] ... segment=n/4 ... DONE notice=...`：逐段结果；入队ACK不算完成。
+- `[LAP] START/DONE n`：完成圈数持续增长，整圈四段都成功才计数。
+- `[UART1] bytes/dropped/overflows/errors`：字节与接收异常，后三项应保持0。
+- `[RX] ... wire/ok/reject/len/ver`：外层有效帧、成功解析、负载拒绝和最近格式。Odom要求len>=51、ver=4；VelPos要求len>=35、ver=2。
+- 两类wire与ok应同时持续增长至少60秒，多次复位检查；只有一种更新不能当双流通过。
+
+`wire`增长但`ok`不增长时查看负载长度 / 版本；`wire=0`表示未收到该类型有效帧。
+接收服务超过缓冲可覆盖的时间未运行时，驱动记录溢出、丢弃残帧并从完整有效帧重新同步。1024字节约容纳22ms满速流量，业务必须按默认频率服务Poll。
+任务DONE不代替实车轨迹精度验收；遥测新鲜度提示不是硬件停车保障，断线时不能确认取消 / 零速送达。

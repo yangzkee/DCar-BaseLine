@@ -33,6 +33,12 @@ def static_checks():
               'HARDWARE/DFCom_Print.c', 'SYSTEM/usart/usart.c', 'SYSTEM/usart/usart.h', 'USER/main.c']
     for relative in shared:
         assert (ROOT/'DFCom_Example'/relative).read_bytes() == (ROOT/'DFCom_PatchOnly'/relative).read_bytes(), relative
+    arduino = ROOT/'DFCom_Arduino'
+    header = (arduino/'DFCom/src/DFCom.h').read_text()
+    impl = (arduino/'DFCom/src/DFCom.cpp').read_text().replace('#include "DFCom.h"', '')
+    sketch = (arduino/'DFCom/examples/DcarON_Stadium/DcarON_Stadium.ino').read_text().replace('#include <DFCom.h>', '')
+    expected = '/* 独立单文件操场例程；无需安装DFCom库。 */\n' + header + '\n' + impl + '\n' + sketch
+    assert (arduino/'SingleFile/DcarON_Stadium_AllInOne/DcarON_Stadium_AllInOne.ino').read_text() == expected, 'Arduino single-file mirror'
     for variant in ('DFCom_Example',):
         project = ROOT/variant/'USER/Template.uvprojx'
         tree = ET.parse(project)
@@ -48,7 +54,12 @@ def static_checks():
             ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
     for path in (ROOT/'ros2').rglob('package.xml'):
         ET.parse(path)
-    subprocess.run(['git', 'diff', '--check'], cwd=ROOT, check=True, capture_output=True, text=True)
+    git_probe = subprocess.run(['git', 'rev-parse', '--show-toplevel'],
+                               cwd=ROOT, capture_output=True, text=True)
+    if git_probe.returncode == 0:
+        subprocess.run(['git', 'diff', '--check'], cwd=ROOT, check=True, capture_output=True, text=True)
+    else:
+        print('Source archive: Git diff check unavailable (no Git metadata)')
     print('Current Markdown links, Keil references, XML, Python syntax and STM32 mirror passed')
 
 
@@ -78,7 +89,7 @@ def main():
     if sys.version_info < (3, 10):
         raise SystemExit('Use Python >=3.10 with PyYAML; the system Python may be older.')
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--only', nargs='+', choices=['static', 'slots', 'queue', 'demo', 'arduino', 'python'])
+    parser.add_argument('--only', nargs='+', choices=['static', 'slots', 'queue', 'demo', 'usart', 'arduino', 'python'])
     parser.add_argument('--python-pattern', default='test_*.py',
                         help='Target only a failed Python test file during repair')
     parser.add_argument('--budget-state', type=Path,
@@ -92,6 +103,7 @@ def main():
         'slots': ['sh', 'tests/host/run_move_slots_tests.sh'],
         'queue': ['sh', 'tests/host/run_queue_tests.sh'],
         'demo': ['sh', 'tests/host/run_demo_tests.sh'],
+        'usart': ['sh', 'tests/host/run_usart_dma_tests.sh'],
         'arduino': ['sh', 'tests/arduino/run_arduino_tests.sh'],
         'python': [sys.executable, '-m', 'unittest', 'discover', '-s',
                    'ros2/dcaron_bridge/test', '-p', options.python_pattern, '-v'],

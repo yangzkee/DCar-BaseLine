@@ -511,6 +511,7 @@ static u8 q_query(u8 operation, u8 expected_notice)
         start = g_local_tick_ms;
         while ((u32)(g_local_tick_ms - start) < 500) {
             if (q_query_ready && q_query_notice == expected_notice) return 1;
+            DFCom_Poll();
             delay_ms(1);
         }
     }
@@ -652,6 +653,7 @@ static u16 q_submit(u8 command, const float *values, u8 count, u8 grade)
                     return 0;
                 }
             }
+            DFCom_Poll();
             delay_ms(1);
         }
         /* ACK丢失或队列满：重发完全相同的ID和字节，不消耗新编号。 */
@@ -715,6 +717,7 @@ u8 DFQueue_Wait(u16 id, u32 timeout_ms)
         }
         /* 已入队任务丢失终止帧时查结果，不重复创建运动。 */
         if ((u32)(g_local_tick_ms - last) >= 500) { q_manage(5, id); last = g_local_tick_ms; }
+        DFCom_Poll();
         delay_ms(1);
     }
     q_error = "task completion timed out; cancellation attempted";

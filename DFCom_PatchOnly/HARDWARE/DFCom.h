@@ -213,7 +213,7 @@ extern u8 g_dfcom_unit_mode;   /* 默认 = DFCOM_UNIT_CM */
 /* 没有专门的 DFCom_Init —— 见 main.c::System_Init，分三步：
  *   uart_init(460800);       // USART1 接小车
  *   usart2_init(115200);     // USART2 接 USB-TTL 看 printf
- *   Odom_PrintTimer_Init();  // TIM2 维护 tick + 10Hz 自动打印VelPos及可用Odom
+ *   Odom_PrintTimer_Init();  // TIM2只维护tick；主循环定期调用DFCom_Poll()
  */
 
 /* ---- 无任务ID运动接口：等待DMA可用，发送后不等运动结束。当前示例不调用。 ---- */
@@ -264,8 +264,9 @@ void Cmd_Subscribe_VelPos (u8 mode, u16 freq_hz);
  */
 void Cmd_Query_DcarState(void);
 
-/* ---- Rx 接收侧（DFCom_Rx.c）：在 USART1 IDLE 中断里自动调用 ---- */
-void DFCom_RxParse(u8 *data, u16 size);  /* 协议解析入口（中断里调） */
+/* ---- Rx 接收侧（DFCom_Rx.c）：主循环USART1_ReceivePoll调用 ---- */
+void DFCom_RxParse(u8 *data, u16 size);
+void DFCom_RxReset(void); /* 接收发生硬件错误/溢出后丢弃残帧，仅主循环调用。 */
 
 /* ---- 启动阶段的运动回传隔离 ----
  * Quarantine: 丢弃全部 A=0x6F，供上电停车/诊断阶段隔离旧回传。
@@ -276,7 +277,7 @@ void DFCom_MoveSessionStart(void);
 
 /* ---- 可选辅助 ---- */
 
-/* 等待最近一条运动指令完成（阻塞；ODOM 的定时打印仍由中断继续）
+/* 等待最近一条运动指令完成（阻塞；等待期间服务主循环遥测日志）
  *   cmd_code:    CMD_LINEAR / CMD_LINEAR_WITH_YAW / CMD_ROT / CMD_ARC
  *   timeout_ms:  0 = 无限等；>0 = 本地等待上限，超时本身不发送停车
  * 返回: MOVE_WAIT_DONE / MOVE_WAIT_TIMEOUT / MOVE_WAIT_INTERRUPTED
@@ -296,10 +297,24 @@ u8 GetMoveProgress(u8 cmd_code);
 /* 最近一次完成帧 notice（0=完成, 1=拒绝, 0x0A=RC接管, CMD_xxx=新指令打断） */
 u8 GetMoveNotice(u8 cmd_code);
 
-/* ---- Print（DFCom_Print.c）：TIM2 中断自动调用 ---- */
+/* 独立接收诊断：计数只包含已通过帧尾/地址/校验和验证的帧。
+ * wire增而frame_count不增 => 负载版本/长度不匹配；wire=0 => 未收到该类型有效帧。 */
+typedef struct {
+    u32 odom_wire, velpos_wire;
+    u32 odom_rejected, velpos_rejected;
+    u8 odom_len, odom_version, velpos_len, velpos_version;
+} DFComRxDiag_t;
+extern volatile DFComRxDiag_t g_dfcom_rx_diag;
+
+/* TIM2只维护tick；主循环和等待循环调用Poll，日志开关不影响收帧/计时/运动。 */
+extern volatile u8 g_print_odom_enable; /* 日志总开关，不影响收帧或运动。 */
+extern volatile u8 g_print_velpos_enable;
+extern volatile u8 g_print_full_odom_enable;
+void DFCom_Poll(void);
+/* ---- Print（DFCom_Print.c）：仅在主循环调用 ---- */
 void VelPos_Print(void);            /* VelPos v2 简化版 (默认调) */
 void Odom_Print(void);              /* Odom v4 全量版，收到新鲜回传时自动打印 */
-void Odom_PrintTimer_Init(void);    /* 启动 10Hz 自动打印 */
+void Odom_PrintTimer_Init(void);    /* 启动1ms计时，打印由Poll调度 */
 
 
 /* ---- 当前运动接口：DFLink队列v6；只允许在主循环调用 ----

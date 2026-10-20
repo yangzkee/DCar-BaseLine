@@ -1,0 +1,21 @@
+name: Arduino AVR
+on:
+  push:
+    paths: ['DFCom_Arduino/**', '.github/workflows/arduino.yml']
+  pull_request:
+    paths: ['DFCom_Arduino/**', '.github/workflows/arduino.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  uno:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - run: arduino-cli core update-index
+      - run: arduino-cli core install arduino:avr
+      - name: Compile both complete sketches for Uno
+        run: |
+          arduino-cli compile --fqbn arduino:avr:uno --libraries DFCom_Arduino DFCom_Arduino/DFCom/examples/DcarON_Stadium
+          arduino-cli compile --fqbn arduino:avr:uno DFCom_Arduino/SingleFile/DcarON_Stadium_AllInOne

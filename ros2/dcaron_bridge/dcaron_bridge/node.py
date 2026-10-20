@@ -15,8 +15,10 @@ from sensor_msgs.msg import Imu
 from tf2_ros import TransformBroadcaster
 import serial
 
-from .protocol import (Parser, STREAMS, CommandWatchdog, subscribe, velocity,
-                       decode, quaternion)
+from .protocol import Parser, CommandWatchdog, subscribe, velocity, frame, quaternion
+from .telemetry import TelemetryReceiver
+from std_msgs.msg import String
+import json
 
 
 class DcaronBridge(Node):
@@ -24,7 +26,7 @@ class DcaronBridge(Node):
         super().__init__("dcaron_bridge", **kwargs)
         defaults = {
             "port": "COM3", "baudrate": 460800, "robot_id": 1, "host_id": 151,
-            "telemetry": "velpos", "frequency": 10,
+            "frequency": 10,
             "enable_cmd_vel": False, "cmd_timeout": 0.5,
             "max_linear_speed": 0.5, "max_angular_speed": 1.0,
             "telemetry_timeout": 2.0, "reconnect_interval": 3.0,
@@ -53,8 +55,16 @@ class DcaronBridge(Node):
             raise ValueError("Nonempty port/frame names required; frames cannot start with /")
         if c["odom_frame"] == c["base_frame"]:
             raise ValueError("odom_frame and base_frame must differ")
-        self.subscribe_frame = subscribe(c["telemetry"], c["frequency"],
-                                         target=c["robot_id"], source=c["host_id"])
+        self.subscription_frames = [subscribe(name, c["frequency"], target=c["robot_id"], source=c["host_id"])
+                                    for name in ('odom', 'velpos')]
+        self.subscription_frames.append(frame(0x0B, 0x40, target=c['robot_id'], source=c['host_id']))
+        self.pending_subscriptions = []
+        self.next_subscription = 0.0
+        self.telemetry = TelemetryReceiver()
+        self.last_published = None
+        self.last_diagnostic = 0.0
+        self.rx_bytes = 0
+        self.device_state = None
         self.parser = Parser()
         self.watchdog = CommandWatchdog(c["cmd_timeout"])
         self.serial_factory = serial_factory or serial.Serial
@@ -67,7 +77,10 @@ class DcaronBridge(Node):
         self.connected_at = 0.0
         # Reliable publishers also satisfy best-effort sensor subscribers.
         self.odom_pub = self.create_publisher(Odometry, "odom", 10)
-        self.imu_pub = self.create_publisher(Imu, "imu/data", 10) if c["telemetry"] == "odom" else None
+        self.imu_pub = self.create_publisher(Imu, "imu/data", 10)
+        self.stream_pubs = {name: self.create_publisher(Odometry, 'telemetry/' + name, 10)
+                            for name in ('odom', 'velpos')}
+        self.diagnostics_pub = self.create_publisher(String, 'telemetry/status', 10)
         self.tf = TransformBroadcaster(self) if c["publish_tf"] else None
         # Keep only the newest command; never use transient-local motion commands.
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -82,7 +95,7 @@ class DcaronBridge(Node):
         self.timer = self.create_timer(0.01, self.tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.get_logger().info(
             f"DFLink port={c['port']} baud={c['baudrate']} robot={c['robot_id']} "
-            f"stream={c['telemetry']} frequency={c['frequency']}Hz "
+            f"streams=odom+velpos frequency={c['frequency']}Hz "
             f"cmd_vel={c['enable_cmd_vel']} actions={c['enable_motion_actions']}")
 
     def write(self, data):
@@ -97,7 +110,7 @@ class DcaronBridge(Node):
 
     def disconnect(self, error):
         if self.actions is not None:
-            self.actions.interrupt(f'Serial/telemetry failure: {error}', send_stop=False)
+            self.actions.interrupt(f'Serial failure: {error}', send_stop=False)
         self.get_logger().error(f"DFLink port={self.cfg['port']} failed: {error}")
         if self.port is not None:
             try:
@@ -113,10 +126,8 @@ class DcaronBridge(Node):
     def on_command(self, msg):
         if not self.cfg["enable_cmd_vel"] or self.port is None:
             return
-        # Ignore commands while telemetry is absent/stale. Never replay on reconnect.
+        # Telemetry is observational; serial availability and command limits govern sending.
         now = time.monotonic()
-        if self.last_rx is None or now - self.last_rx >= self.cfg["telemetry_timeout"]:
-            return
         values = (msg.linear.x, msg.linear.y, msg.angular.z)
         valid = (all(math.isfinite(v) for v in values)
                  and math.hypot(*values[:2]) <= self.cfg["max_linear_speed"]
@@ -149,11 +160,19 @@ class DcaronBridge(Node):
                 self.watchdog.reset()
                 self.last_rx = None
                 self.connected_at = now
+                self.telemetry = TelemetryReceiver()
+                self.last_published = None
+                self.device_state = None
+                self.rx_bytes = 0
                 self.stale_reported = False
                 if self.cfg["enable_cmd_vel"] or self.cfg['enable_motion_actions']:
                     self.stop()
-                self.write(self.subscribe_frame)  # Exactly once per connection.
-                self.get_logger().info("Serial connected; DFLink subscription sent, waiting for telemetry")
+                self.pending_subscriptions = list(self.subscription_frames)
+                self.next_subscription = now
+                self.get_logger().info("Serial connected; independent telemetry/state requests scheduled")
+            if self.pending_subscriptions and now >= self.next_subscription:
+                self.write(self.pending_subscriptions.pop(0))
+                self.next_subscription = now + 0.02  # Independent requests, once per connection.
             # Watchdog precedes RX processing; a noisy stream cannot starve it.
             if self.actions is not None:
                 self.actions.tick()
@@ -162,38 +181,52 @@ class DcaronBridge(Node):
             if self.watchdog.expired(now):
                 self.stop()
                 self.get_logger().warning("cmd_vel timeout; sent zero velocity")
-            for packet in self.parser.feed(self.port.read(min(self.port.in_waiting, 4096))):
+            received = self.port.read(min(self.port.in_waiting, 4096))
+            self.rx_bytes += len(received)
+            for packet in self.parser.feed(received):
                 if (packet.target, packet.source) == (self.cfg['host_id'], self.cfg['robot_id']):
                     if packet.a == 0x6F and self.actions is not None:
                         self.actions.receive(packet)
                         continue
-                if (packet.target, packet.source, packet.a, packet.b) != (
-                        self.cfg["host_id"], self.cfg["robot_id"], 0x6C,
-                        STREAMS[self.cfg["telemetry"]]):
+                if (packet.target, packet.source) != (self.cfg['host_id'], self.cfg['robot_id']):
                     continue
-                try:
-                    state = decode(packet)
-                except ValueError:
-                    continue
-                if self.last_rx is None or self.stale_reported:
-                    self.get_logger().info("Valid telemetry received")
-                self.last_rx = time.monotonic()
-                self.stale_reported = False
-                self.publish_state(state)
-            if now - (self.last_rx if self.last_rx is not None else self.connected_at) >= self.cfg["telemetry_timeout"]:
-                if not self.stale_reported:
-                    if self.cfg["enable_cmd_vel"] or self.cfg['enable_motion_actions']:
-                        self.stop()
-                    self.get_logger().warning(
-                        "No fresh telemetry: check wiring, stream version and license (Odom v4 requires Pro). "
-                        "No stale data published; motion input inhibited.")
-                    self.stale_reported = True
-                # Resubscribe on a new connection, also recovering MCU restarts.
-                self.disconnect("Telemetry timeout")
+                if (packet.a, packet.b) == (0x8C, 0x40) and len(packet.payload) >= 12:
+                    self.device_state = {'received': True, 'imu_calibrated': packet.payload[0]}
+                name = self.telemetry.receive(packet, time.monotonic())
+                if name is not None:
+                    self.last_rx = time.monotonic()
+                    self.publish_state(self.telemetry.streams[name].state,
+                                       publisher=self.stream_pubs[name], publish_imu=False, publish_tf=False)
+            selected = self.telemetry.preferred(now)
+            if selected is not None:
+                status = self.telemetry.streams[selected]
+                key = (selected, status.ok)
+                if key != self.last_published:
+                    self.publish_state(status.state)
+                    self.last_published = key
+            else:
+                self.last_published = None
+            if now - self.last_diagnostic >= 1.0:
+                self.last_diagnostic = now
+                report = {'bytes': self.rx_bytes, 'selected': selected, 'state': self.device_state,
+                          'streams': {name: {'wire': row.wire, 'ok': row.ok, 'reject': row.rejected,
+                                            'len': row.length, 'ver': row.version,
+                                            'fresh': row.fresh(now),
+                                            'age_s': None if row.last_rx is None else max(0, now-row.last_rx)}
+                                      for name, row in self.telemetry.streams.items()}}
+                message = String()
+                message.data = json.dumps(report)
+                self.diagnostics_pub.publish(message)
+                # Missing telemetry is reported without reconnecting or interrupting motion.
+                stale = self.last_rx is None and now-self.connected_at >= self.cfg['telemetry_timeout']
+                stale = stale or (self.last_rx is not None and now-self.last_rx >= self.cfg['telemetry_timeout'])
+                if stale and not self.stale_reported:
+                    self.get_logger().warning('No fresh telemetry; motion still requires ACK/DONE and its own deadline')
+                self.stale_reported = stale
         except (OSError, serial.SerialException) as exc:
             self.disconnect(exc)
 
-    def publish_state(self, state):
+    def publish_state(self, state, *, publisher=None, publish_imu=True, publish_tf=True):
         stamp = self.get_clock().now().to_msg()  # Host receive time, not MCU uptime.
         q = quaternion(state.rpy)
         odom = Odometry()
@@ -212,8 +245,8 @@ class DcaronBridge(Node):
             odom.twist.twist.angular.x, odom.twist.twist.angular.y, odom.twist.twist.angular.z = state.gyro
             for index in (21, 28, 35):
                 odom.twist.covariance[index] = 0.1
-        self.odom_pub.publish(odom)
-        if self.imu_pub is not None and state.gyro is not None:
+        (publisher if publisher is not None else self.odom_pub).publish(odom)
+        if publish_imu and state.gyro is not None:
             imu = Imu()
             imu.header.stamp = stamp
             imu.header.frame_id = self.cfg["imu_frame"]
@@ -225,7 +258,7 @@ class DcaronBridge(Node):
             imu.linear_acceleration.x, imu.linear_acceleration.y, imu.linear_acceleration.z = state.acceleration
             # All-zero covariance means unknown per sensor_msgs/Imu.
             self.imu_pub.publish(imu)
-        if self.tf is not None:
+        if publish_tf and self.tf is not None:
             transform = TransformStamped()
             transform.header = odom.header
             transform.child_frame_id = odom.child_frame_id
@@ -241,8 +274,9 @@ class DcaronBridge(Node):
             try:
                 if self.cfg["enable_cmd_vel"] or self.cfg['enable_motion_actions']:
                     self.stop()
-                self.write(subscribe(self.cfg["telemetry"], self.cfg["frequency"], False,
-                                     self.cfg["robot_id"], self.cfg["host_id"]))
+                for name in ('odom', 'velpos'):
+                    self.write(subscribe(name, self.cfg["frequency"], False,
+                                         self.cfg["robot_id"], self.cfg["host_id"]))
             except (OSError, serial.SerialException) as exc:
                 self.get_logger().error(f"Shutdown write failed: {exc}")
             finally:

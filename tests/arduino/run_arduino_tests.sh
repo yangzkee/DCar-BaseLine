@@ -27,3 +27,14 @@ c++ -x c++ -std=c++11 -Wall -Wextra -Werror \
     -o "$build_dir/test_single_file"
 
 "$build_dir/test_single_file"
+
+for kind in library single; do
+    define=
+    if [ "$kind" = single ]; then define=-DSINGLE_FILE; fi
+    source=
+    if [ "$kind" = library ]; then source="$repo_dir/DFCom_Arduino/DFCom/src/DFCom.cpp"; fi
+    c++ -std=c++11 -Wall -Wextra -Werror $sanitizer_flags $define \
+        -I"$repo_dir/tests/arduino/stubs" -I"$repo_dir/DFCom_Arduino/DFCom/src" \
+        "$repo_dir/tests/arduino/test_stadium.cpp" $source -o "$build_dir/stadium"
+    "$build_dir/stadium"
+done

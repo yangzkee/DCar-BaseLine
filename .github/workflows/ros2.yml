@@ -26,6 +26,7 @@ jobs:
         working-directory: ros2/dcaron_bridge
         run: |
           python -m unittest discover -s test -p test_protocol.py -v
+          python -m unittest discover -s test -p test_telemetry.py -v
           python -m unittest discover -s test -p test_motion.py -v
           python -m unittest discover -s test -p test_queue.py -v
           python -m unittest discover -s test -p test_trajectory.py -v

@@ -32,7 +32,7 @@ def load_trajectory(path):
     return specs, timeout
 
 
-def main(args=None):
+def main(args=None, *, repeat=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('file', type=Path)
     parser.add_argument('--execute', action='store_true')
@@ -66,22 +66,30 @@ def main(args=None):
                 value = getattr(spec, name)
                 setattr(segment, name, value if name in ('command', 'profile') else float(value))
             goal.segments.append(segment)
-        future = client.send_goal_async(goal, feedback_callback=lambda message: print(message.feedback, flush=True))
-        rclpy.spin_until_future_complete(node, future, timeout_sec=5)
-        if not future.done():
-            raise RuntimeError('Goal acknowledgement lost; inspect bridge before retrying')
-        handle = future.result()
-        if not handle.accepted:
-            raise RuntimeError('Goal rejected; inspect bridge log for the reason')
-        result = handle.get_result_async()
-        # A zero goal timeout uses the bridge default; allow its default maximum of 120s.
-        rclpy.spin_until_future_complete(node, result, timeout_sec=timeout + 10 if timeout else 130)
-        if not result.done():
-            raise RuntimeError('Result timeout; attempting cancellation')
-        completed = True
-        print(result.result().result)
-        if result.result().status != 4 or not result.result().result.success:
-            raise RuntimeError('Trajectory failed')
+        lap = 0
+        while rclpy.ok():
+            completed = False
+            future = client.send_goal_async(goal, feedback_callback=lambda message: print(message.feedback, flush=True))
+            rclpy.spin_until_future_complete(node, future, timeout_sec=5)
+            if not future.done():
+                raise RuntimeError('Goal acknowledgement lost; inspect bridge before retrying')
+            handle = future.result()
+            if not handle.accepted:
+                raise RuntimeError('Goal rejected; inspect bridge log for the reason')
+            result = handle.get_result_async()
+            # A zero goal timeout uses the bridge default; allow its default maximum of 120s.
+            rclpy.spin_until_future_complete(node, result, timeout_sec=timeout + 10 if timeout else 130)
+            if not result.done():
+                raise RuntimeError('Result timeout; attempting cancellation')
+            completed = True
+            print(result.result().result)
+            if result.result().status != 4 or not result.result().result.success:
+                raise RuntimeError('Trajectory failed')
+            lap += 1
+            print(f'[LAP] DONE {lap}: {len(specs)} tasks completed', flush=True)
+            handle = None
+            if not repeat:
+                break
     finally:
         if handle is not None and handle.accepted and not completed:
             future = handle.cancel_goal_async()
@@ -93,3 +101,10 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+
+
+def stadium_main():
+    """Installed continuous stadium client; one launch starts the complete test."""
+    from ament_index_python.packages import get_package_share_directory
+    path = Path(get_package_share_directory('dcaron_bridge')) / 'examples/stadium.yaml'
+    main([str(path), '--execute'], repeat=True)

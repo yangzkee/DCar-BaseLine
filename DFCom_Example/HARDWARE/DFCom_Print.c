@@ -1,22 +1,4 @@
-/******************************************************************************
- * DFCom_Print.c - 终端打印 + 本地 tick
- * ---------------------------------------------------------------------------
- * 提供两个东西：
- *   1. g_local_tick_ms：本地毫秒计数（TIM2 1ms 中断维护，给队列超时等用）
- *   2. VelPos_Print()：把 g_velpos 打到 USART2（printf 已重定向到 USART2）
- *      TIM2 计数到 100ms 时自动调用一次（10Hz 刷屏）
- *
- * TIM2 中断：72MHz / 72 / 1000 = 1kHz，标称1ms一次中断
- *   - 每次中断 g_local_tick_ms++
- *   - 每100次中断打印VelPos，Odom新鲜时同时打印；printf耗时影响tick精度
- *
- * 学生在 USART2（USB-TTL 接 PC）终端看到的输出（坐标系 ROS REP-103）：
- *   X(fwd) = +X 前进方向 (m)        Y(left) = +Y 左方 (m)
- *   Yaw 协议层是弧度 (rad)，但终端打印转成度 (deg) 学生看着方便，CCW+ 逆时针为正
- *
- *   [ODOM] Yaw=  0.12 X(fwd)= 0.000 Y(left)= 0.000 Vx(fwd)= 0.00 Vy(left)= 0.00 fr=10
- *   [ODOM] Yaw=  0.15 X(fwd)= 0.024 Y(left)= 0.000 Vx(fwd)= 0.25 Vy(left)= 0.00 fr=11
- ******************************************************************************/
+/* TIM2只维护1ms时基；DFCom_Poll在主循环调度日志，USART2非阻塞发送。 */
 #include "DFCom.h"
 #include "stm32f10x.h"
 #include "usart.h"
@@ -27,12 +9,14 @@ volatile u32 g_local_tick_ms = 0;
 
 /* ---- 控制是否自动打印（学生可以临时关掉） ---- */
 volatile u8 g_print_odom_enable = 1;
+volatile u8 g_print_velpos_enable = 1;
+volatile u8 g_print_full_odom_enable = 1;
 
 /* ===========================================================================
  * TIM2 初始化：1ms 中断
  *   APB1 = 36MHz, TIM2 计数频率 = 72MHz / Prescaler
  *   实际Prescaler=72-1，Period=1000-1，1MHz/1000=1kHz
- *   当前printf在TIM2中断内执行，tick不是独立的精密墙钟。
+ *   不在TIM2中断内打印。
  * ===========================================================================*/
 void Odom_PrintTimer_Init(void)
 {
@@ -61,28 +45,42 @@ void Odom_PrintTimer_Init(void)
     TIM_Cmd(TIM2, ENABLE);
 }
 
-/* ===========================================================================
- * TIM2 中断服务 —— 每 1ms 一次
- *   1. g_local_tick_ms++ (给队列超时等用)
- *   2. 每 100ms (= 10Hz) 调一次打印
- *
- * 始终打印VelPos；Odom已收到且最近1秒内更新时一同打印，无需切换。
- * ===========================================================================*/
+/* 中断不调用printf，不访问USART2，不依赖任何遥测开关。 */
 void TIM2_IRQHandler(void)
 {
     if (TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET) {
         TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
-
         g_local_tick_ms++;
+    }
+}
 
-        /* 10Hz 打印 */
-        if (g_print_odom_enable && (g_local_tick_ms % 100) == 0) {
-            VelPos_Print();
-            if (g_odom.frame_count &&
-                (u32)(g_local_tick_ms - g_odom.local_tick_ms) < 1000) {
-                Odom_Print();
-            }
-        }
+/* 仅从主循环调用；错过的日志不补打，避免积压影响运动任务。 */
+void DFCom_Poll(void)
+{
+    static u32 last_print, last_diag;
+    u32 now;
+    USART1_ReceivePoll(); /* 必须在日志开关检查之前，关闭日志仍持续收帧。 */
+    now = g_local_tick_ms;
+    if (!g_print_odom_enable) return;
+    if ((u32)(now - last_print) >= 100) {
+        last_print = now;
+        if (g_print_velpos_enable) VelPos_Print();
+        if (g_print_full_odom_enable && g_odom.frame_count &&
+            (u32)(now - g_odom.local_tick_ms) < 1000) Odom_Print();
+    }
+    if ((u32)(now - last_diag) >= 1000) {
+        last_diag = now;
+        printf("[UART1] bytes=%lu dropped=%lu overflows=%lu errors=%lu\r\n",
+               (unsigned long)g_usart1_rx_bytes, (unsigned long)g_usart1_rx_dropped,
+               (unsigned long)g_usart1_rx_overflows, (unsigned long)g_usart1_rx_errors);
+        printf("[RX] odom wire=%lu ok=%lu reject=%lu len=%u ver=%u; "
+               "velpos wire=%lu ok=%lu reject=%lu len=%u ver=%u\r\n",
+               (unsigned long)g_dfcom_rx_diag.odom_wire, (unsigned long)g_odom.frame_count,
+               (unsigned long)g_dfcom_rx_diag.odom_rejected,
+               (unsigned)g_dfcom_rx_diag.odom_len, (unsigned)g_dfcom_rx_diag.odom_version,
+               (unsigned long)g_dfcom_rx_diag.velpos_wire, (unsigned long)g_velpos.frame_count,
+               (unsigned long)g_dfcom_rx_diag.velpos_rejected,
+               (unsigned)g_dfcom_rx_diag.velpos_len, (unsigned)g_dfcom_rx_diag.velpos_version);
     }
 }
 
@@ -118,7 +116,7 @@ void TIM2_IRQHandler(void)
  * ===========================================================================*/
 void VelPos_Print(void)
 {
-    /* 逐字段复制最近值；高优先级USART可抢占，此快照不保证整帧原子性 */
+    /* 解析和打印同在主循环；Poll收帧结束后读取最近的完整数据。 */
     VelPosData_t snap;
     snap.yaw_rad      = g_velpos.yaw_rad;
     snap.n_pos_x_m    = g_velpos.n_pos_x_m;    /* N 系: 累积位置 (m) */
@@ -174,7 +172,7 @@ void VelPos_Print(void)
  * ★ 坐标系跟 VelPos 完全一致 (N 系 / B 系区别看 VelPos_Print 上面的注释)
  *
  * ★ 启用方式
- *   main自动订阅，TIM2在最近1秒内有Odom回包时自动与VelPos一同打印。
+ *   main独立订阅，Poll在最近1秒内有Odom回包时打印。
  * ===========================================================================*/
 void Odom_Print(void)
 {

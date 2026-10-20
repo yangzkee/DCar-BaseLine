@@ -3,6 +3,7 @@
  * 无任务ID的逐条DFLink接口；SI遥测和REP-103方向与其他平台一致，不支持队列v6。
  ******************************************************************************/
 #include "DFCom.h"
+#include <string.h>
 
 /* ---- 协议常量 ---- */
 static const uint8_t DF_HEAD = 0xDF;
@@ -35,7 +36,7 @@ void DFCom_t::begin(long baud, HardwareSerial &port)
 {
     _ser = &port;
     _ser->begin(baud);
-    _idx = 0; _st = 0; _need = 0;
+    _idx = 0;
 
     /*
      * Arduino 可能在 DCar 已经执行旧任务时复位。先隔离回传并连续停车两次：
@@ -43,11 +44,11 @@ void DFCom_t::begin(long baud, HardwareSerial &port)
      */
     _resetMotionSession(0);
     moveVel(0, 0, 0);
-    delay(1000);
+    serviceDelay(1000);
     moveVel(0, 0, 0);
-    delay(50);
+    serviceDelay(50);
     update();
-    _idx = 0; _st = 0; _need = 0;
+    _idx = 0;
     _resetMotionSession(1);
 }
 
@@ -276,7 +277,7 @@ void DFCom_t::moveArc(float radius, float dyaw, float speed, uint8_t profile)
 {
     radius = _toM(radius); dyaw = _toRad(dyaw); speed = _toM(speed);
     _lastCmd = DFCOM_CMD_ARC;
-    if (speed <= 0.0f) {
+    if (radius <= 0.0f || speed == 0.0f) {
         _motionSendFailed(DFCOM_CMD_ARC);
         return;
     }
@@ -338,51 +339,59 @@ void DFCom_t::queryState()
  * ===========================================================================*/
 void DFCom_t::update()
 {
-    while (_ser->available()) _feed((uint8_t)_ser->read());
+    while (_ser->available()) { rxBytes++; _feed((uint8_t)_ser->read()); }
+}
+
+void DFCom_t::serviceDelay(uint32_t ms)
+{
+    uint32_t start = millis();
+    while ((uint32_t)(millis() - start) < ms) {
+        update();
+        delay(1);
+    }
 }
 
 void DFCom_t::_feed(uint8_t b)
 {
-    switch (_st) {
-        case 0:  /* 找帧头 */
-            if (b == DF_HEAD) { _buf[0] = DF_HEAD; _idx = 1; _st = 1; }
-            break;
-
-        case 1:  /* 收头部 [1..5] = tgt,robot,A,B,len */
-            _buf[_idx++] = b;
-            if (_idx == 6) {
-                uint8_t len = _buf[5];
-                if (_buf[1] != DF_PC_ID || _buf[2] != DF_ROBOT_ID || len > 60) {
-                    /* 头部不合法 → 复位重新找头 (失败字节若是 0xDF 则重启一帧) */
-                    _st = 0; _idx = 0;
-                    if (b == DF_HEAD) { _buf[0] = DF_HEAD; _idx = 1; _st = 1; }
-                } else {
-                    _need = (uint8_t)(6 + len + 3);   /* header6 + payload + FD + 2csum */
-                    _st = 2;
-                }
-            }
-            break;
-
-        case 2:  /* 收 payload + 帧尾 + 校验 */
-            if (_idx < sizeof(_buf)) _buf[_idx++] = b;
-            if (_idx >= _need) {
-                uint8_t len = _buf[5];
-                uint8_t tailPos = (uint8_t)(6 + len);
-                if (_buf[tailPos] == DF_TAIL) {
-                    uint16_t sc = 0;
-                    uint8_t sum_len = (uint8_t)(len + 7);
-                    for (uint8_t i = 0; i < sum_len; i++) sc += _buf[i];
-                    uint16_t rec = (uint16_t)_buf[tailPos + 1] | ((uint16_t)_buf[tailPos + 2] << 8);
-                    if (sc == rec) _dispatch(_buf[3], _buf[4], &_buf[6], len);
-                }
-                _st = 0; _idx = 0;
-            }
-            break;
+    if (_idx == sizeof(_buf)) {
+        memmove(_buf, _buf + 1, --_idx);
     }
+    _buf[_idx++] = b;
+    bool found;
+    do {
+        found = false;
+        uint8_t incomplete = _idx;
+        for (uint8_t start = 0; start < _idx; start++) {
+            if (_buf[start] != DF_HEAD) continue;
+            if (_idx-start < 6) { if (start < incomplete) incomplete = start; continue; }
+            if (_buf[start+1] != DF_PC_ID || _buf[start+2] != DF_ROBOT_ID || _buf[start+5] > 60) continue;
+            uint8_t total = _buf[start+5] + 9;
+            if (_idx-start < total) { if (start < incomplete) incomplete = start; continue; }
+            if (_buf[start+total-3] != DF_TAIL) continue;
+            uint16_t sum = 0;
+            for (uint8_t i = 0; i < total-2; i++) sum += _buf[start+i];
+            uint16_t received = (uint16_t)_buf[start+total-2] | ((uint16_t)_buf[start+total-1]<<8);
+            if (sum != received) continue;
+            _dispatch(_buf[start+3], _buf[start+4], _buf+start+6, _buf[start+5]);
+            _idx -= start+total;
+            memmove(_buf, _buf+start+total, _idx);
+            found = true;
+            break;
+        }
+        if (!found) {
+            _idx -= incomplete;
+            memmove(_buf, _buf+incomplete, _idx);
+        }
+    } while (found);
 }
 
 void DFCom_t::_dispatch(uint8_t A, uint8_t B, const uint8_t *p, uint8_t len)
 {
+    if (A == 0x6C && (B == 0x80 || B == 0x81)) {
+        DFStreamDiag &diag = B == 0x80 ? odomDiag : velposDiag;
+        diag.wire++; diag.len = len; diag.version = len ? p[0] : 0;
+        if (len < (B == 0x80 ? 51 : 35) || diag.version != (B == 0x80 ? 4 : 2)) diag.rejected++;
+    }
     if (A == 0x6C && B == 0x80 && len >= 51 && p[0] == 0x04) {
         /* DF_odom 全量 51B */
         odom.roll  = rd_s16(&p[1])  / SC_ANGLE;
@@ -405,6 +414,7 @@ void DFCom_t::_dispatch(uint8_t A, uint8_t B, const uint8_t *p, uint8_t len)
         odom.posZ  = rd_s32(&p[39]) / SC_POS;
         odom.carTimeS  = rd_u32(&p[43]);
         odom.carTimeUs = rd_u32(&p[47]);
+        odom.localTickMs = millis();
         odom.frameCount++;
         odom.fresh = 1;
     }
@@ -422,6 +432,7 @@ void DFCom_t::_dispatch(uint8_t A, uint8_t B, const uint8_t *p, uint8_t len)
         velpos.posZ  = rd_s32(&p[23]) / SC_POS;
         velpos.carTimeS  = rd_u32(&p[27]);
         velpos.carTimeUs = rd_u32(&p[31]);
+        velpos.localTickMs = millis();
         velpos.frameCount++;
         velpos.fresh = 1;
     }

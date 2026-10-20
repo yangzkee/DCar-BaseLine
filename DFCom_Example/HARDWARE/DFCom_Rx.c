@@ -427,6 +427,8 @@ static void parse_dcar_state(const u8 *payload, u8 payload_len)
 
 
 /* 按完整且已验证的帧分发。队列回包与无ID回包使用不同B值。 */
+volatile DFComRxDiag_t g_dfcom_rx_diag;
+
 static void dispatch_frame(const u8 *frame)
 {
     u8 a = frame[3];
@@ -434,8 +436,19 @@ static void dispatch_frame(const u8 *frame)
     u8 length = frame[5];
     const u8 *payload = frame + 6;
     if (a == 0x6C) {
-        if (b == 0x80) parse_odom_v4(payload, length);
-        else if (b == 0x81) parse_velpos_v2(payload, length);
+        if (b == 0x80) {
+            g_dfcom_rx_diag.odom_wire++;
+            g_dfcom_rx_diag.odom_len = length;
+            g_dfcom_rx_diag.odom_version = length ? payload[0] : 0;
+            if (length < 51 || payload[0] != 4) g_dfcom_rx_diag.odom_rejected++;
+            parse_odom_v4(payload, length);
+        } else if (b == 0x81) {
+            g_dfcom_rx_diag.velpos_wire++;
+            g_dfcom_rx_diag.velpos_len = length;
+            g_dfcom_rx_diag.velpos_version = length ? payload[0] : 0;
+            if (length < 35 || payload[0] != 2) g_dfcom_rx_diag.velpos_rejected++;
+            parse_velpos_v2(payload, length);
+        }
     } else if (a == 0x6F) {
         if (b == 0x85) DFQueue_Receive(payload, length);
         else parse_move_progress(b, payload, length);
@@ -448,10 +461,16 @@ static void dispatch_frame(const u8 *frame)
  * 保存不完整帧；校验后可一次分发多帧。缓存固定128字节，接受payload<=60。
  * 扫描后续候选，坏LEN不会一直挡住它后面的有效帧。仅由接收上下文调用。
  */
+static u8 stream[128];
+static u16 used;
+
+void DFCom_RxReset(void)
+{
+    used = 0; /* 丢弃断流前的残帧，不清除已收到的遥测与队列结果。 */
+}
+
 void DFCom_RxParse(u8 *data, u16 size)
 {
-    static u8 stream[128];
-    static u16 used;
     u16 input;
     u16 header;
     u16 incomplete;
@@ -572,7 +591,7 @@ u8 WaitMoveDone(u8 cmd_code, u32 timeout_ms)
         }
         if (timeout_ms != 0) {                /* timeout_ms == 0 ⇒ 永久等待 */
             if ((g_local_tick_ms - start) >= timeout_ms) {
-                printf("[WAIT.TIMEOUT] cmd=0x%02X waited=%lums now_tick=%lu (没等到 progress=FF)\r\n",
+                printf("[WAIT.TIMEOUT] cmd=0x%02X waited=%lums now_tick=%lu (no terminal progress=FF)\r\n",
                        (unsigned)cmd_code,
                        (unsigned long)(g_local_tick_ms - start),
                        (unsigned long)g_local_tick_ms);
@@ -580,6 +599,7 @@ u8 WaitMoveDone(u8 cmd_code, u32 timeout_ms)
             }
         }
         /* 无ID等待每10ms检查一次；保持串口与tick中断运行。 */
+        DFCom_Poll();
         delay_ms(10);
     }
 }

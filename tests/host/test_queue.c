@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "DFCom.h"
 volatile u32 g_local_tick_ms;
+void DFCom_Poll(void) {}
 static u8 tx[100],txlen;
 static u8 no_reply,drop_ack,tx_error,split_at;
 static u16 capability=6;
@@ -36,6 +37,15 @@ u8 USART1_Send_By_DMA(u8 *b,u8 len){
         reply(0,0x10,id);
     }
     return 0;
+}
+static void telemetry_reply(u8 b, u8 len, u8 ver) {
+    u8 frame[69] = {0xdf,DFCOM_PC_ID,DFCOM_ROBOT_ID,0x6c,0,0,0};
+    u16 sum = 0;
+    unsigned i;
+    frame[4]=b; frame[5]=len; frame[6]=ver; frame[6+len]=0xfd;
+    for(i=0;i<(unsigned)len+7;i++) sum+=frame[i];
+    frame[len+7]=(u8)sum; frame[len+8]=(u8)(sum>>8);
+    DFCom_RxParse(frame,(u16)(len+9));
 }
 int main(void){
     u16 a,b,c,sum;u8 p,n,i;
@@ -91,5 +101,20 @@ int main(void){
     telemetry[42]=(u8)sum;telemetry[43]=(u8)(sum>>8);
     for(i=0;i<44;i++)DFCom_RxParse(telemetry+i,1);
     assert(g_velpos.frame_count==1 && g_velpos.yaw_rad==0);
+    Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS,10);
+    assert(tx[3]==4 && tx[4]==0x80 && tx[5]==2 && tx[6]==1 && tx[7]==1);
+    Cmd_Subscribe_VelPos(ODOM_MODE_CONTINUOUS,10);
+    assert(tx[3]==4 && tx[4]==0x81 && tx[5]==2 && tx[6]==1 && tx[7]==1);
+    telemetry_reply(0x80,51,4);
+    telemetry_reply(0x81,35,2);
+    telemetry_reply(0x80,51,4);
+    telemetry_reply(0x81,35,2);
+    assert(g_odom.frame_count==2 && g_velpos.frame_count==3);
+    assert(g_dfcom_rx_diag.odom_wire==2 && g_dfcom_rx_diag.velpos_wire==3);
+    telemetry_reply(0x81,35,3);
+    telemetry_reply(0x81,0,0);
+    telemetry_reply(0x80,50,4);
+    assert(g_velpos.frame_count==3 && g_odom.frame_count==2);
+    assert(g_dfcom_rx_diag.velpos_rejected==2 && g_dfcom_rx_diag.odom_rejected==1);
     puts("queue wire, rollover, duplicate, trim, query, failures and fragmented/coalesced RX passed");return 0;
 }

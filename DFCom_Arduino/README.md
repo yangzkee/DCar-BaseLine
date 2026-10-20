@@ -1,71 +1,82 @@
 # Arduino Uno / Nano 客户端
 
-当前目录提供 **无任务ID的逐条运动接口**，库版本2.0.1。
-它未实现STM32/ROS的队列v6；不能把 `DFQueue_*`、profile16..20或轨迹YAML直接套到这里。
-它与其他平台使用相同的DFLink外层帧和ROS REP-103方向，但运动payload和完成回包不同。
+版本 **0.4.1**，目标ATmega328P。使用无任务ID的逐条运动接口，未实现队列v6；接收数据使用SI，与STM32 / ROS方向一致。
 
 ## 目录
 
-- [入口与实际运行方式](#section-1)
-- [接线和车端前提](#section-2)
-- [单位和API](#section-3)
+- [下载与运行](#下载与运行)
+- [接线与车端能力](#接线与车端能力)
+- [函数与数据](#函数与数据)
+- [独立接收与诊断](#独立接收与诊断)
+- [验收与检查](#验收与检查)
 
-平台选择、函数速查与分层验收标准见[根 README](../README.md)。
+## 下载与运行
 
-<a id="section-1"></a>
-## 入口与实际运行方式
+二选一，实际通信实现、API和操场动作相同：
 
-- 库方式：把 `DFCom` 文件夹拷到Arduino的libraries目录，打开 `DFCom/examples/DcarON_Square/DcarON_Square.ino`。
-- 单文件方式：打开 `SingleFile/DcarON_Square_AllInOne/DcarON_Square_AllInOne.ino`，不必安装库。
-- 目标板为Uno/Nano（ATmega328P）。上传时断开D0/D1与车端连接，上传后再接。
+- 库版：将 `DFCom` 放到Arduino libraries，打开 [DcarON_Stadium.ino](DFCom/examples/DcarON_Stadium/DcarON_Stadium.ino)。
+- 单文件：打开 [DcarON_Stadium_AllInOne.ino](SingleFile/DcarON_Stadium_AllInOne/DcarON_Stadium_AllInOne.ino)，无需安装库。
 
-**两个现有示例上电初始化后都会在loop中重复跑方形**，STM32当前则自动持续循环四段操场路线。
-实际动作是前进50cm、原地左转90°，重复四次后等1秒，再开始下一圈。
-库版会查询校准状态但仅打印提示，未阻止未校准时运动；单文件版setup不查询校准状态。
-示例没有用wait返回值作为失败门禁；自定义可靠序列应检查返回值，失败就stop并退出本轮，不要照抄为实测成功保证。
+选Uno / Nano对应板型，上传时断开D0/D1与车端连接，上传后接回。默认就运动，不用改模式。
+上电两次停车之间等1000ms，会话间隔50ms；订阅Odom、间隔20ms、订阅VelPos并查询状态；固定观察500ms，等待3000ms后开始循环。等待期间持续收帧，查询结果只报告，不决定是否启动。
 
-<a id="section-2"></a>
-## 接线和车端前提
+每圈逐条执行：倒行半圆（R=30cm，+180°，-15cm/s）→后退60cm→同样倒行半圆→后退60cm同时正向旋转360°，profile=1。
+每段等待自然完成，上限60000ms；四段成功后 `completedLaps` 增长并立即开始下一圈，无1秒圈间等待。
+任一步失败发送stop，`testStopped=true` 后不再发新动作，loop继续update。检查接线 / 车端状态后复位重启。
 
-| Arduino | 车端 / 调试 |
+## 接线与车端能力
+
+| Arduino | 连接 |
 |---|---|
-| D1 TX | 经5V→3.3V电平转换接车端USART3 RX/PB11 |
-| D0 RX | 接车端USART3 TX/PB10，确认电平兼容 |
-| GND | 与车端共地 |
-| D3（可选调试TX） | USB-TTL RX，9600 |
+| D1 TX | 5V→3.3V电平转换后接车USART3 RX/PB11 |
+| D0 RX | 接车USART3 TX/PB10，确认电平兼容 |
+| GND | 共地 |
 
-车端USART3需支持 **115200双向DFLink**，包含里程计和完成回传。仅能接收指令、不能回传的固件不满足等待接口前提。
-本仓库没有对应车端烧录包或完整兼容表，不能假设所有车已启用USART3回传。
-运动前须激活/校准；Odom订阅还需相应能力，教学频率用10Hz，建议不超过50Hz。
-SoftwareSerial调试可能屏蔽中断，避免大量打印造成硬件串口丢字节。
+车端USART3需支持115200 / 8N1双向DFLink，无ID圆弧、平移、平移并转向和完成回包。路线需要全向底盘，运动前完成车辆激活 / 校准。
+标准VelPos与全量Odom各有能力要求；没有Odom时VelPos仍单独可用，没有任何遥测时仍按完成回包判运动结果。
 
-<a id="section-3"></a>
-## 单位和API
+Uno的唯一硬件串口留给车端，不向Serial打印文字。例程不使用SoftwareSerial日志，以免屏蔽硬件接收中断；遥测、计数和结果保存在公开变量里，业务可直接读取。
+若使用额外硬件串口作日志，输出必须非阻塞、限频，接收服务独立于日志开关。车端串口不能同时连接上传程序 / 串口助手发送文本。
 
-库默认厘米、cm/s、度、度/s；`DFCom.useMeters()`切换米、m/s、弧度、rad/s。
-单文件版函数参数固定厘米/度，不提供库对象的单位切换。
-+X前、+Y左、正yaw逆时针；接收侧数据存储仍是SI。
-profile=0匀速、1梯形加减速、2距离闭环；这些不是队列加速度档位。
+## 函数与数据
 
-```cpp
-DFCom.begin(115200);       // 双停车和本地运动会话初始化，不是v6握手
-DFCom.subscribeOdom(10);
-DFCom.moveLinear(10, 0, 6, 2); // 前进10cm，6cm/s
-if (!DFCom.waitDone(10000)) {
-    DFCom.stop();          // 等待失败由应用决定停车/结束，库不自动推进序列
-}
-DFCom.update();            // loop中调用；waitDone内部也会解析回传
-```
+声明看 [DFCom.h](DFCom/src/DFCom.h)，实际动作看两个例程的setup/loop，单文件同样使用 `DFCom.` API。
 
-`waitDone(ms)`仅自然完成返回true，超时或中断返回false；0为永久等待，失联也不自行返回。
-超时只结束本地等待，不自动取消车端任务。内部A/B本地槽不能创造车端任务ID，仍无法完全消除丢包后的同类回包歧义。
-`moveVel`无自动终点，必须主动 `stop()`。
+| 函数 | 用法 |
+|---|---|
+| `begin(115200)` | 初始化硬件串口、双停车、本地运动会话 |
+| `moveLinear(x,y,speed,profile)` | 相对平移，speed>0，负x后退 |
+| `moveLinearWithYaw(x,y,yaw,speed,profile)` | 固定平移路径同时旋转车身 |
+| `moveRot(yaw,omega)` | 原地相对旋转，omega>0 |
+| `moveArc(radius,yaw,signed_speed,profile)` | radius>0、速度非零；负速度倒行 |
+| `waitDone(ms)` | true自然完成；false超时 / 中断 / 发送失败，内部收帧；0无限等 |
+| `stop()` / `moveVel(vx,vy,wz)` | 发零速 / 持续速度；持续速度无自动终点，不可等完成 |
+| `subscribeOdom(10)` / `subscribeVelPos(10)` | 独立连续订阅，例程均已调用 |
+| `queryState()` | 请求状态，结果在 `.state` |
+| `update()` | 消费串口字节，业务主循环持续调用 |
+| `serviceDelay(ms)` | 延时期间持续收帧，不用长时间delay阻断接收 |
+| `odomAvailable()` / `velposAvailable()` | 该类确有回包且最近1秒更新过 |
 
-首次测试先把loop改为仅调用 `DFCom.update()`（单文件为 `dcarUpdate()`），观察状态和新遥测，避免默认循环直接开始运动。
-库版用 `DFCom.odom.frameCount` 检查帧数增长；单文件读取并清零 `odomFresh`，确认它能再次置1。
-仅看到一圈末尾的位置打印不代表运动成功：原例程忽略等待结果，超时后也会到这行。
-通过标准应包含每条等待成功、实际四次前进50cm与左转90°、一圈后约1秒暂停再重复；物理精度需外部测量和事先约定指标。
-完整测试步骤、API对应表与验收条件见[根README测试章节](../README.md#其他平台测试)。
+发送默认厘米、cm/s、度、度/s；`useMeters()`切米、m/s、弧度、rad/s，`useMillimeters()`切毫米 / 度。+X前、+Y左、正yaw逆时针。
+profile=0匀速、1梯形、2距离闭环，不能填队列档位16..20。`waitDone`超时本身只结束等待，停车由应用执行，现成例程已处理。
+无ID回包不携带本地任务号，本地双槽不能完全排除丢包后的同类迟到帧歧义；不要与队列控制混发。
 
-库API看 [DFCom.h](DFCom/src/DFCom.h)，修改动作看两个示例末尾的setup/loop。
-离线回归统一从仓库根目录执行 `python3 tests/run_checks.py`；真实AVR编译、Flash/RAM和实车行为须在目标环境验证。
+## 独立接收与诊断
+
+两种流分别订阅，更新真实来源，不复制、不交替：
+
+- `DFCom.odom`：全量姿态、IMU、速度、位置、`frameCount/localTickMs/fresh`。
+- `DFCom.velpos`：简化yaw / 速度 / 位置及独立元数据。
+- `DFCom.odomDiag/velposDiag`：`wire`外层校验通过帧、`rejected`长度/版本不符、`len/version`最近负载格式；对应数据的frameCount为成功解析数。
+- `DFCom.rxBytes`：主循环已取出的串口字节数；它不包含AVR硬件/核心接收环可能丢失的字节，不可当作线端无丢包证明。
+- `DFCom.state.received/imuCalibrated`：状态回包 / 校准位，只报告。
+
+接收缓存有界，保留分片并扫描后续有效帧，支持两类粘连及坏长度后的重同步。延时和waitDone持续update，日志不参与解析。
+所有接收数据存SI。`xCm/yCm/yawDeg`只转换Odom，VelPos单独用 `.velpos.posX*100` 等，不能拿Odom的取值函数冒充VelPos。
+Odom不可用时读VelPos；两种均过期时标为缺失，不把零值当新回传。
+
+## 验收与检查
+
+按[根README四段验收表](../README.md#验收标准)检查动作、完成结果及多圈漂移。两类wire与frameCount应同时持续增长，rejected保持0；只收到一种流不能算双流通过。
+两版业务同样检查逐段waitDone、失败停止后续任务和completedLaps增长。结果需结合外部测量，不承诺统一距离 / 角度精度。
+仓库根目录 `python3 tests/run_checks.py` 包含主机回归；CI另编译两个Uno完整目标并报告Flash/RAM。真实AVR收帧稳定性与实车运动须在对应板卡验证，主机模拟不代替硬件验收。

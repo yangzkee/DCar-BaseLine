@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>dcaron_bridge</name>
-  <version>0.3.1</version>
+  <version>0.4.1</version>
   <description>Lightweight DFLink V3 serial bridge for DcarON.</description>
   <maintainer email="220290149+yangzkee@users.noreply.github.com">yangzkee</maintainer>
   <license>Proprietary</license>
@@ -12,6 +12,7 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>python3-serial</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

@@ -29,6 +29,8 @@ public:
     std::deque<uint8_t> testRx;
     std::vector<uint8_t> testTx;
     long testBaud = 0;
+    bool testAutoComplete = false;
+    uint8_t testFailCommand = 0;
 
     virtual void begin(long baud) { testBaud = baud; }
     int available() override { return (int)testRx.size(); }
@@ -42,6 +44,14 @@ public:
     size_t write(const uint8_t *data, size_t size) override
     {
         testTx.insert(testTx.end(), data, data + size);
+        if (testAutoComplete && size >= 9 && data[3] == 2 && data[4] >= 0x63 && data[4] <= 0x66) {
+            uint8_t reply[] = {0xDF,0x97,1,0x6F,data[4],2,0xFF,
+                               (uint8_t)(data[4] == testFailCommand ? 1 : 0),0xFD,0,0};
+            uint16_t sum = 0;
+            for (unsigned i=0;i<9;i++) sum+=reply[i];
+            reply[9]=(uint8_t)sum; reply[10]=(uint8_t)(sum>>8);
+            testRx.insert(testRx.end(),reply,reply+sizeof(reply));
+        }
         return size;
     }
     void testClear()

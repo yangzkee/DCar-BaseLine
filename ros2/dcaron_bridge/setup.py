@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name="dcaron_bridge",
-    version="0.3.1",
+    version="0.4.1",
     packages=["dcaron_bridge"],
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/dcaron_bridge"]),
@@ -21,5 +21,6 @@ setup(
     tests_require=["pytest"],
     entry_points={"console_scripts": ["dcaron_bridge = dcaron_bridge.node:main",
                                       "trajectory_sequence = dcaron_bridge.trajectory:main",
-                                      "motion_sequence = dcaron_bridge.sequence:main"]},
+                                      "motion_sequence = dcaron_bridge.sequence:main",
+                                      "stadium_test = dcaron_bridge.trajectory:stadium_main"]},
 )

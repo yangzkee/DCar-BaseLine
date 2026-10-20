@@ -22,21 +22,24 @@ void USART_DMA_Tx_Configuration(void);
 u8   USART1_Send_By_DMA(u8 *data, u8 size);
 void USART1_IRQHandler(void);
 
-/* ★ USART1 RX buffer 容量
- * ──────────────────────────────────────────────────────────────────────
- * 同时订阅 Odom + VelPos 时, 小车一个 tick 可能回传两帧
- * (Odom v4 60B + VelPos v2 44B = 104B 背靠背)。
- * 旧的 100 字节装不下, 后续帧尾部被 DMA 截断 → 校验和失败 → 整帧丢。
- * 现在扩到 256 字节, 能容下 4~5 帧粘连 + 余量。
- * 配套: usart.c 里 DMA_BufferSize, DMA_SetCurrDataCounter, size 类型都改 u16。
- * 配套: DFCom_Rx.c DFCom_RxParse(u8*, u16 size) 参数类型也改 u16。
+/* 循环DMA持续接收，不在解析时停用；1024字节约容纳22ms满速460800流量。
+ * 主循环至少每5ms调用USART1_ReceivePoll（DFCom_Poll已包含），禁止在ISR调用。
+ * 溢出计数为字节，不代表帧；可从下一完整有效帧重新同步。
  */
-#define USART1_RX_BUFF_SIZE 256
-extern u8 USART1_RX_BUFF[USART1_RX_BUFF_SIZE];
+#define USART1_RX_BUFF_SIZE 1024
+void USART1_ReceivePoll(void);
+void DMA1_Channel5_IRQHandler(void);
+extern volatile u32 g_usart1_rx_bytes;
+extern volatile u32 g_usart1_rx_dropped;
+extern volatile u32 g_usart1_rx_overflows;
+extern volatile u32 g_usart1_rx_errors;
+extern volatile u8 USART1_RX_BUFF[USART1_RX_BUFF_SIZE];
 extern u8 USART1_TX_BUFF[100];
 extern u8 USART1_cnt;
 
 /* USART2（printf 终端） */
 void usart2_init(u32 bound);
+void USART2_IRQHandler(void);
+extern volatile u32 g_usart2_log_dropped; /* 日志缓冲满的丢字节数，不影响车端TX/RX。 */
 
 #endif

@@ -6,6 +6,7 @@
 void DFCom_MoveCommandSent(u8 cmd_code);
 
 volatile u32 g_local_tick_ms = 0;
+void DFCom_Poll(void) {}
 
 static unsigned g_delay_calls;
 static void (*g_delay_hook)(void);

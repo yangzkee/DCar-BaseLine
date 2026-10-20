@@ -1,7 +1,7 @@
 # Windows ROS 2：构建和运行当前客户端
 
 本教程使用Windows 11 x64、ROS 2 Lyrical、VS 2022 C++工具链和CMD。
-当前源码为0.3.1，队列运动要求车端v6。环境安装步骤不代表本版已完成Windows或真车验证。
+当前源码为0.4.1，队列运动要求车端v6。环境安装步骤不代表本版已完成Windows或真车验证。
 
 ## 1. 准备环境
 
@@ -82,31 +82,28 @@ ros2 topic echo /odom --once
 ros2 topic hz /odom
 ```
 
-默认只读遥测，不接受运动；VelPos不提供IMU角速度。
+默认独立订阅Odom和VelPos，分别发布 `/telemetry/odom`、`/telemetry/velpos` 和 `/telemetry/status`；本通用桥接入口只读，不自动发路线。VelPos不提供IMU角速度。
 
-## 5. 运行当前队列示例
+## 5. 持续操场测试
 
-在终端A退出只读节点后开启Action：
-
-```bat
-ros2 launch dcaron_bridge bridge.launch.py port:=COM5 enable_motion_actions:=true
-```
-
-在终端B发送一次前进10cm（会让车运动）：
+终端A退出之前的桥接，直接执行以下一条命令；它自动启动桥接、Action和持续操场客户端：
 
 ```bat
-ros2 action send_goal /motion dcaron_interfaces/action/Motion "{command: 100, x: 0.1, speed: 0.06, profile: 18, timeout: 10.0}" --feedback
+ros2 launch dcaron_bridge stadium_test.launch.py port:=COM5
 ```
 
-先离线检查正方形，再显式执行：
+不再另开占用同一串口的桥接节点。需要全向底盘，半径0.30m倒行半圆→后退0.60m→同样倒行半圆→后退0.60m同时转360°；整圈success=true后立即下一圈，无人工触发或圈间等待，Ctrl+C结束。
+
+终端B观察独立遥测和诊断：
 
 ```bat
-ros2 run dcaron_bridge trajectory_sequence dcaron_bridge/examples/square.yaml
-ros2 run dcaron_bridge trajectory_sequence dcaron_bridge/examples/square.yaml --execute
+ros2 topic echo /telemetry/status
+ros2 topic hz /telemetry/odom
+ros2 topic hz /telemetry/velpos
 ```
 
-操场用 `stadium.yaml`，要求全向底盘。每个命令运行一次；字段和结果见 [动作说明](motion.md)。
-profile必须16..20，不能省略为0。车端队列v6能力不足、队列非空或遥测不新鲜时不会开始路线。
+两类wire/ok均持续增长才能通过双流验收，reject不增加。Odom缺失时VelPos可单独工作，不需切换模式。
+运动与遥测/状态独立；实际串口故障、队列握手/ACK/DONE失败和任务超时仍会使测试失败。路线及字段见[动作说明](motion.md)，物理验收见[根README](../../README.md#验收标准)。
 
 ## 6. 排查
 
