@@ -29,7 +29,7 @@ class ProtocolTests(unittest.TestCase):
                          bytes.fromhex('DF 01 97 04 6A 02 01 0A FD EF 02'))
 
     def test_subscription_codes(self):
-        self.assertEqual(subscribe('velpos', 10), bytes.fromhex('DF 01 97 04 81 02 01 01 FD FD 02'))
+        self.assertEqual(subscribe('odom', 10), bytes.fromhex('DF 01 97 04 80 02 01 01 FD FC 02'))
         self.assertEqual(subscribe('odom', 100)[6:8], b'\x01\x0a')
         self.assertEqual(subscribe('odom', continuous=False)[6], 2)
         with self.assertRaises(ValueError):
@@ -80,13 +80,11 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(state.position, (123.456, -234.567, 345.678))
         self.assertEqual(state.device_time, (1234, 567))
 
-    def test_velpos_missing_imu_is_not_zero_measurement(self):
-        state = decode(velpos_packet())
-        self.assertEqual(state.rpy, (0.0, 0.0, -1.0))
-        self.assertEqual(state.body_velocity, (0.1, -0.2, 0.3))
-        self.assertEqual(state.position, (123.456, -234.567, 345.678))
-        self.assertIsNone(state.gyro)
-        self.assertIsNone(state.acceleration)
+    def test_removed_velpos_rejected(self):
+        with self.assertRaises(ValueError):
+            decode(velpos_packet())
+        with self.assertRaises(ValueError):
+            subscribe('velpos', 10)
 
     def test_wrong_versions_lengths_and_classes_rejected(self):
         original = odom_packet()

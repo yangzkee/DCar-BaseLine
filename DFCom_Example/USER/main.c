@@ -208,8 +208,7 @@ static void Startup_Diagnose(void)
 {
     u32 t0;
     u32 fc_odom_before,   fc_odom_after;
-    u32 fc_velpos_before, fc_velpos_after;
-    u32 diff_odom, diff_velpos, diff_total;
+    u32 diff_odom, diff_total;
 
     printf("\r\n");
     printf("============================================\r\n");
@@ -228,10 +227,9 @@ static void Startup_Diagnose(void)
            (unsigned long)(((RCC->CR & RCC_CR_HSERDY) != 0) ? 1 : 0),
            (unsigned long)(((RCC->CR & RCC_CR_PLLRDY) != 0) ? 1 : 0));
 
-    /* 步骤 1：独立订阅 Odom + VelPos（持续 10Hz） */
-    printf("[INIT] Subscribe ODOM + VelPos @ 10Hz...\r\n");
+    /* 步骤 1：独立订阅 Odom（持续 10Hz） */
+    printf("[INIT] Subscribe ODOM @ 10Hz...\r\n");
     Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
-    Cmd_Subscribe_VelPos(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
     delay_ms(150);   /* 等 ~1.5 帧, 让链路稳定 */
 
     /* 步骤 2：查询小车状态（IMU 校准 / 控制参数）*/
@@ -265,24 +263,19 @@ static void Startup_Diagnose(void)
         printf("[INIT]    3. 小车有没有上电、是不是 460800 bps\r\n");
     }
 
-    /* 步骤 3：等 200ms 看 telemetry 流是否在动
-     * Odom v4 和 VelPos v2 是两条独立订阅线；本示例两条都订阅，所以两个计数器都看。 */
+
     printf("[INIT] Waiting 200ms to check telemetry flow...\r\n");
     fc_odom_before   = g_odom.frame_count;
-    fc_velpos_before = g_velpos.frame_count;
     delay_ms(200);   /* 10Hz × 0.2s ≈ 2 帧, 足够确认链路 (原来 1500ms 太久了) */
     fc_odom_after   = g_odom.frame_count;
-    fc_velpos_after = g_velpos.frame_count;
     diff_odom   = fc_odom_after   - fc_odom_before;
-    diff_velpos = fc_velpos_after - fc_velpos_before;
-    diff_total  = diff_odom + diff_velpos;
+    diff_total  = diff_odom;
 
     if (diff_total > 0) {
-        printf("[INIT] Telemetry flowing ✓ (Odom=%lu + VelPos=%lu in 200ms)\r\n",
-               (unsigned long)diff_odom, (unsigned long)diff_velpos);
+        printf("[INIT] Odom frames: %lu\r\n", (unsigned long)diff_odom);
         printf("[INIT] ✓ All OK, sending commands...\r\n");
     } else {
-        printf("[INIT] ✗ NO TELEMETRY data (neither Odom v4 nor VelPos v2)!\r\n");
+        printf("[INIT] ✗ NO TELEMETRY data (Odom v4)!\r\n");
         printf("[INIT]   小车没在推数据 -- 可能原因:\r\n");
         printf("[INIT]    1. 接线问题 (同上)\r\n");
         printf("[INIT]    2. 小车未激活 (上位机软件激活后再试)\r\n");
@@ -330,7 +323,6 @@ int main(void)
      *         m / m/s / rad / rad/s
      *         例: Cmd_Move_Linear(0.5f, 0, 0.3f, 2) → 前进 0.5 m, 0.3 m/s
      *
-     *   ⚠ 接收侧 g_odom / g_velpos 字段永远 SI (m / m/s / rad),
      *      不受这个开关影响 (要看 cm/mm 自己 *100 / *1000)。
      * -----------------------------------------------------------*/
     // g_dfcom_unit_mode = DFCOM_UNIT_MM;   /* 毫米 + 度 */

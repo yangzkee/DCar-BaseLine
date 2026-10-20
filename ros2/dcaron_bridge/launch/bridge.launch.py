@@ -14,7 +14,7 @@ def generate_launch_description():
         DeclareLaunchArgument("params_file", default_value=config),
         DeclareLaunchArgument("namespace", default_value=""),
         DeclareLaunchArgument("port", default_value="COM3"),
-        DeclareLaunchArgument("telemetry", default_value="velpos"),
+        DeclareLaunchArgument("telemetry", default_value="odom"),
         DeclareLaunchArgument("enable_cmd_vel", default_value="false"),
         DeclareLaunchArgument("enable_motion_actions", default_value="false"),
         Node(

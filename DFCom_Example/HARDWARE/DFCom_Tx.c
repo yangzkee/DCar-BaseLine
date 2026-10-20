@@ -590,33 +590,7 @@ void Cmd_Subscribe_Odom(u8 mode, u16 freq_hz)
     send_frame(buf, cnt);
 }
 
-void Cmd_Subscribe_VelPos(u8 mode, u16 freq_hz)
-{
-    /* Hz → 小车端枚举值 */
-    u8 fcode;
-    u8 vtype;
-    u8 buf[15];
-    u8 cnt;
 
-    if      (freq_hz == 10)  fcode = 1;
-    else if (freq_hz == 50)  fcode = 5;
-    else if (freq_hz == 100) fcode = 10;
-    else if (freq_hz == 200) fcode = 20;
-    else if (freq_hz == 250) fcode = 25;
-    else if (freq_hz == 500) fcode = 50;
-    else                     fcode = 1;
-
-    if      (mode == ODOM_MODE_CONTINUOUS) vtype = 0x01;
-    else if (mode == ODOM_MODE_ONESHOT)    vtype = 0x02;
-    else                                   vtype = 0x02;
-
-    cnt = build_header(buf, 0x04, 0x81);
-    buf[cnt++] = 2;
-    buf[cnt++] = vtype;
-    buf[cnt++] = fcode;
-    cnt = finalize_frame(buf, 2);
-    send_frame(buf, cnt);
-}
 
 
 /*============================================================================

@@ -12,7 +12,7 @@ except ImportError:
     rclpy = None
 
 from dcaron_bridge.protocol import Parser, frame, subscribe
-from test_protocol import odom_packet, velpos_packet
+from test_protocol import odom_packet
 
 
 class FakeSerial:
@@ -88,7 +88,7 @@ class RosNodeTests(unittest.TestCase):
         from geometry_msgs.msg import Twist
         from nav_msgs.msg import Odometry
         from sensor_msgs.msg import Imu
-        bridge = self.make_bridge(telemetry='odom', enable_cmd_vel=True)
+        bridge = self.make_bridge(telemetry='odom', publish_imu=True, enable_cmd_vel=True)
         peer = Node('test_subscriber', context=self.context)
         self.nodes.append(peer)
         self.executor.add_node(peer)
@@ -123,13 +123,13 @@ class RosNodeTests(unittest.TestCase):
         from geometry_msgs.msg import Twist
         node = self.make_bridge()
         port = self.ports[-1]
-        self.assertEqual(port.tx, [subscribe('velpos')])
+        self.assertEqual(port.tx, [subscribe('odom')])
         self.assertIsNone(node.cmd_sub)
         self.assertIsNone(node.imu_pub)
-        port.inject(velpos_packet(), source=2)
+        port.inject(odom_packet(), source=2)
         node.tick()
         self.assertIsNone(node.last_rx)
-        port.inject(velpos_packet())
+        port.inject(odom_packet())
         node.tick()
         self.assertIsNotNone(node.last_rx)
         node.on_command(Twist())
@@ -139,7 +139,7 @@ class RosNodeTests(unittest.TestCase):
         from geometry_msgs.msg import Twist
         node = self.make_bridge(enable_cmd_vel=True)
         port = self.ports[-1]
-        port.inject(velpos_packet())
+        port.inject(odom_packet())
         node.tick()
         command = Twist()
         command.linear.x = 0.2
@@ -187,7 +187,7 @@ class RosNodeTests(unittest.TestCase):
         self.nodes.remove(node)
         node.destroy_node()
         self.assertEqual(Parser().feed(port.tx[-2])[0].payload, bytes(12))
-        self.assertEqual(port.tx[-1], subscribe('velpos', continuous=False))
+        self.assertEqual(port.tx[-1], subscribe('odom', continuous=False))
         self.assertTrue(port.closed)
 
     def action_client(self):
@@ -210,7 +210,7 @@ class RosNodeTests(unittest.TestCase):
         client, Motion = self.action_client()
         try:
             for command in (0x63, 0x64, 0x65, 0x66):
-                port.inject(velpos_packet())
+                port.inject(odom_packet())
                 node.tick()
                 goal = Motion.Goal()
                 goal.command, goal.x, goal.yaw = command, 0.1, 0.2
@@ -233,7 +233,7 @@ class RosNodeTests(unittest.TestCase):
     def test_action_cancel_old_reply_quarantine_and_rejection(self):
         node = self.make_bridge(enable_motion_actions=True, motion_protocol="legacy")
         port = self.ports[-1]
-        port.inject(velpos_packet())
+        port.inject(odom_packet())
         node.tick()
         client, Motion = self.action_client()
         try:
@@ -268,7 +268,7 @@ class RosNodeTests(unittest.TestCase):
     def test_action_deadline_and_reconnect_do_not_replay(self):
         node = self.make_bridge(enable_motion_actions=True, motion_protocol="legacy")
         port = self.ports[-1]
-        port.inject(velpos_packet())
+        port.inject(odom_packet())
         node.tick()
         client, Motion = self.action_client()
         try:
@@ -285,14 +285,14 @@ class RosNodeTests(unittest.TestCase):
             node.next_connect = 0
             node.tick()
             self.assertIn(0x63, node.actions.quarantine.pending)
-            self.assertEqual([p.b for data in self.ports[-1].tx for p in Parser().feed(data)], [0x62, 0x81])
+            self.assertEqual([p.b for data in self.ports[-1].tx for p in Parser().feed(data)], [0x62, 0x80])
         finally:
             client.destroy()
 
     def test_action_cross_next_and_extended_pose(self):
         node = self.make_bridge(enable_motion_actions=True, motion_protocol="legacy")
         port = self.ports[-1]
-        port.inject(velpos_packet())
+        port.inject(odom_packet())
         node.tick()
         client, Motion = self.action_client()
         try:
@@ -321,7 +321,7 @@ class RosNodeTests(unittest.TestCase):
         from dcaron_interfaces.action import Trajectory
         from dcaron_interfaces.msg import MotionSegment
         node=self.make_bridge(enable_motion_actions=True)
-        port=self.ports[-1];port.inject(velpos_packet());node.tick()
+        port=self.ports[-1];port.inject(odom_packet());node.tick()
         peer=Node('test_trajectory_client',context=self.context)
         self.nodes.append(peer);self.executor.add_node(peer)
         client=ActionClient(peer,Trajectory,'trajectory')

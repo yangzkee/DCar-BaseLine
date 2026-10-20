@@ -1,3 +1,5 @@
+> 2026-10-20：telemetry统一为odom。Std/Pro均支持；publish_imu默认false，仅Pro可开启；Mini/SE不开放。旧velpos选项已删除。
+
 > **Beta 0.3（2026-10-19）**：新版 STM32/ROS 连续队列、五档加速度及两个示例（操场；正方形+原地旋转）见 [Beta入口](../docs/Beta_通信与示例_2026-10-19.md)。下文未修订部分为旧接口参考，不能把旧0/1/2与新16..20混用。
 
 # DcarON ROS 2 客户端

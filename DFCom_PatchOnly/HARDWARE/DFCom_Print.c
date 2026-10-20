@@ -75,38 +75,13 @@ void TIM2_IRQHandler(void)
 
         /* 10Hz 打印 */
         if (g_print_odom_enable && (g_local_tick_ms % 100) == 0) {
-            VelPos_Print();   /* 简化版默认打印 */
-            // Odom_Print();  /* 全量版按需打开 */
+            Odom_Print();   /* 简化版默认打印 */
         }
     }
 }
 
-/* ===========================================================================
- * 打印一行 VelPos v2 简化数据到 USART2（printf 已重定向到 USART2）
- * ===========================================================================*/
-void VelPos_Print(void)
-{
-    VelPosData_t snap;
-    snap.yaw_rad      = g_velpos.yaw_rad;
-    snap.n_pos_x_m    = g_velpos.n_pos_x_m;
-    snap.n_pos_y_m    = g_velpos.n_pos_y_m;
-    snap.b_vel_x_mps  = g_velpos.b_vel_x_mps;
-    snap.b_vel_y_mps  = g_velpos.b_vel_y_mps;
-    snap.frame_count  = g_velpos.frame_count;
 
-    if (snap.frame_count == 0) {
-        printf("[VELPOS] (no data yet, send Cmd_Subscribe_VelPos?)\r\n");
-        return;
-    }
 
-    printf("[VELPOS] Yaw=%7.2f X(N,fwd)=%7.3f Y(N,left)=%7.3f Vx(B,fwd)=%6.2f Vy(B,left)=%6.2f fr=%lu\r\n",
-           (double)DFCOM_RAD2DEG(snap.yaw_rad),
-           (double)snap.n_pos_x_m,
-           (double)snap.n_pos_y_m,
-           (double)snap.b_vel_x_mps,
-           (double)snap.b_vel_y_mps,
-           (unsigned long)snap.frame_count);
-}
 
 /* ===========================================================================
  * 打印一行 ODOM 数据到 USART2（printf 已重定向到 USART2）

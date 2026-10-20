@@ -148,10 +148,7 @@ typedef struct {
 
 extern volatile OdomData_t g_odom;
 
-/* ===========================================================================
- * VelPosData_t — 简化版 VelPos v2 数据 (只有 yaw + 速度 + 位置)
- *   对应小车回传帧: CMD 0x6C 0x81, 35B payload, version=0x02
- * ===========================================================================*/
+
 typedef struct {
     float yaw_rad;          /* rad, ROS CCW+ */
 
@@ -176,9 +173,8 @@ typedef struct {
     u32   local_tick_ms;
     u32   frame_count;
     u8    fresh;
-} VelPosData_t;
+} MapOdomData_t;
 
-extern volatile VelPosData_t g_velpos;
 
 /* ===========================================================================
  * 3. 运动状态（应用通常不用直接读，给 WaitMoveDone 内部用）
@@ -234,7 +230,6 @@ extern volatile DcarState_t g_dcar_state;
  *
  * 内部转换后, 协议层永远是 SI (米 + rad), 小车端不需要知道这件事。
  *
- * 接收侧 g_odom / g_velpos 字段不受这个开关影响, 永远是 SI 原生
  * (想看 cm/mm/deg, 自己 *100 / *1000 / DFCOM_RAD2DEG() 转一下)。
  * ===========================================================================*/
 typedef enum {
@@ -291,13 +286,8 @@ void Cmd_Move_Arc           (float radius_m, float dyaw_rad, float speed_mps, u8
 void Cmd_Move_Rot           (float dyaw_rad, float omega_max_rad_s);                                    /* 0x63 原地旋转（无 profile） */
 void Cmd_Move_Vel           (float vx_mps, float vy_mps, float vz_rad_s);                               /* 0x62 持续速度（无完成回传） */
 
-/* ODOM/VelPos 订阅：发一次小车就持续发送
- *   mode: ODOM_MODE_CONTINUOUS / ODOM_MODE_ONESHOT / ODOM_MODE_STOP
- *   freq_hz: 10/50/100/200/250/500（小车协议枚举，其他自动 fallback 到 10）
- * 教学常用：Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
- */
+
 void Cmd_Subscribe_Odom   (u8 mode, u16 freq_hz);
-void Cmd_Subscribe_VelPos (u8 mode, u16 freq_hz);
 
 /* 查询小车激活/校准状态（启动诊断用）
  * 发完后等 100~500ms，读 g_dcar_state.received/imu_calibrated
@@ -337,7 +327,6 @@ u8 GetMoveProgress(u8 cmd_code);
 u8 GetMoveNotice(u8 cmd_code);
 
 /* ---- Print（DFCom_Print.c）：TIM2 中断自动调用 ---- */
-void VelPos_Print(void);            /* VelPos v2 简化版 */
 void Odom_Print(void);              /* Odom v4 全量版 */
 void Odom_PrintTimer_Init(void);    /* 启动 10Hz 自动打印 */
 

@@ -1,47 +1,4 @@
-/*****************************************************************************
- * DFCom_Rx.c - 接收侧实现（SI 单位 / ROS REP-103 坐标系）
- * ---------------------------------------------------------------------------
- * 功能：从 USART1 IDLE 中断收到 DcarON 回传的字节流，做帧定界 + 校验和 +
- *       按 (A, B) 分发到对应解析函数，把数据写到 g_odom / g_move_status /
- *       g_dcar_state 等全局变量供应用层读取。
- *
- *
- * ★★ DF_Link 回传帧总格式（与发送帧地址顺序相反！）★★
- *
- *   字节  内容                           说明
- *   ────  ─────────────────────────      ──────────────────────────────────
- *   [0]   0xDF                           固定帧头
- *   [1]   Target_ID = 0x97               目标地址（=PC_ID，我们这一端）
- *   [2]   Robot_ID  = 0x01               源地址（小车 ID）
- *   [3]   A                              回传类（见下表）
- *   [4]   B                              子码
- *   [5]   LEN
- *   [6..LEN+5]   payload
- *   [LEN+6]      0xFD
- *   [LEN+7/8]    checksum_lo / hi
- *
- *
- * ★★ 本库会解析的 4 种回传 ★★
- *
- *   A      B        含义                                  小车端发起位置
- *   ────   ──────   ──────────────────────────────────    ─────────────────────────
- *   0x6C   0x80     Odom v4 全量帧 (51B payload)          DF_CoreState.c::DF_Send_odom
- *   0x6C   0x81     VelPos v2 简化帧 (35B payload)        DF_CoreState.c::DF_Send_vel_pose
- *   0x6F   *        运动完成回传 (ProgressBack, 2B)       DF_CoreFlag.c::DF_Flag_Back
- *                   payload = [Process(0xFF=完成), Notice]
- *   0x8C   0x40     激活/校准状态 (12B payload)           DF_CoreDate.c::DF_DcarParmState
- *                   ifIMUcali / ifFinetune / IMU 参数 / 控制 Par
- *   0x46   *        IMU 校准完成 (本库不主动用)           DF_CoreFlag.c
- *
- *
- * ★★ 坐标系约定（ROS REP-103）★★
- *
- *    +X = 前进 (forward)         g_odom.n_pos_x_m, b_vel_x_mps
- *    +Y = 左方 (left)            g_odom.n_pos_y_m, b_vel_y_mps
- *    +Yaw = CCW (逆时针)         g_odom.yaw_rad (单位 rad, 协议层 SI rad s32×10000)
- *
- *    与老协议相比：+X/+Y 含义对调 + Yaw 正负反转 + 单位 deg→rad。
- *****************************************************************************/
+
 #include "DFCom.h"
 #include "usart.h"
 #include "delay.h"
@@ -50,7 +7,6 @@
  * 全局数据存储 —— 应用层直接读
  * ===========================================================================*/
 volatile OdomData_t   g_odom         = {0};   /* Odom v4 (CMD 0x6C 0x80, 51B) */
-volatile VelPosData_t g_velpos       = {0};   /* VelPos v2 (CMD 0x6C 0x81, 35B) */
 volatile MoveStatus_t g_move_status[2] = {{0}};
 volatile DcarState_t  g_dcar_state   = {0};
 
@@ -330,54 +286,8 @@ static void parse_odom_v4(const u8 *payload, u8 payload_len)
     g_odom.fresh = 1;
 }
 
-/*============================================================================
- *  解析 2：VelPos v2 数据帧 (A=0x6C, B=0x81, 35B payload)
- *  ──────────────────────────────────────────────────────────────────────────
- *  简化版: 只有 yaw + vel(body/world) + pos(world) + ts (无 roll/pitch/acc/gyro)
- *  小车端发起: DF_CoreState.c::DF_VelPos_v2
- *
- *    偏移      字段           类型     scale    含义
- *    ────      ───────────    ──────  ───────  ─────────────────────────────
- *    [0]       version        u8       --       0x02 (协议版本)
- *    [1..2]    yaw_rad        s16 LE   ×10000  ROS yaw (CCW+)
- *    [3..4]    vel_body_x     s16 LE   ×5000   m/s
- *    [5..6]    vel_body_y     s16 LE   ×5000   m/s
- *    [7..8]    vel_body_z     s16 LE   ×5000   m/s
- *    [9..10]   vel_world_x    s16 LE   ×5000   m/s
- *    [11..12]  vel_world_y    s16 LE   ×5000   m/s
- *    [13..14]  vel_world_z    s16 LE   ×5000   m/s
- *    [15..18]  pos_world_x    s32 LE   ×1000   m
- *    [19..22]  pos_world_y    s32 LE   ×1000   m
- *    [23..26]  pos_world_z    s32 LE   ×1000   m
- *    [27..30]  timestamp_ms   u32 LE   --      启动后毫秒数
- *    [31..34]  timestamp_us   u32 LE   --      毫秒下的微秒部分
- *============================================================================*/
-static void parse_velpos_v2(const u8 *payload, u8 payload_len)
-{
-    if (payload_len < 35) return;
-    if (payload[0] != 0x02) return;  /* version 字节检查 */
 
-    g_velpos.yaw_rad     = read_s16(&payload[1])  / DFCOM_SCALE_ANGLE_RAD;
 
-    g_velpos.b_vel_x_mps = read_s16(&payload[3])  / DFCOM_SCALE_VEL_MPS;
-    g_velpos.b_vel_y_mps = read_s16(&payload[5])  / DFCOM_SCALE_VEL_MPS;
-    g_velpos.b_vel_z_mps = read_s16(&payload[7])  / DFCOM_SCALE_VEL_MPS;
-
-    g_velpos.n_vel_x_mps = read_s16(&payload[9])  / DFCOM_SCALE_VEL_MPS;
-    g_velpos.n_vel_y_mps = read_s16(&payload[11]) / DFCOM_SCALE_VEL_MPS;
-    g_velpos.n_vel_z_mps = read_s16(&payload[13]) / DFCOM_SCALE_VEL_MPS;
-
-    g_velpos.n_pos_x_m   = read_s32(&payload[15]) / DFCOM_SCALE_POS_M;
-    g_velpos.n_pos_y_m   = read_s32(&payload[19]) / DFCOM_SCALE_POS_M;
-    g_velpos.n_pos_z_m   = read_s32(&payload[23]) / DFCOM_SCALE_POS_M;
-
-    g_velpos.car_time_int_s  = read_u32(&payload[27]);
-    g_velpos.car_time_dec_us = read_u32(&payload[31]);
-
-    g_velpos.local_tick_ms = g_local_tick_ms;
-    g_velpos.frame_count++;
-    g_velpos.fresh = 1;
-}
 
 
 /*============================================================================
@@ -532,7 +442,6 @@ void DFCom_RxParse(u8 *data, u16 size)
         switch (A) {
             case 0x6C:   /* 周期数据回传 */
                 if (B == 0x80) parse_odom_v4(payload, len);    /* Odom v4 全量 51B */
-                else if (B == 0x81) parse_velpos_v2(payload, len); /* VelPos v2 简化 35B */
                 break;
 
             case 0x6F:   /* 运动完成/进度回传 */

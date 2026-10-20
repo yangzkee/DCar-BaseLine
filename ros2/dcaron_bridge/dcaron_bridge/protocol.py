@@ -9,7 +9,7 @@ import struct
 
 
 FREQUENCIES = {10: 1, 50: 5, 100: 10, 200: 20, 250: 25, 500: 50, 1000: 100}
-STREAMS = {"velpos": 0x81, "odom": 0x80}
+STREAMS = {"odom": 0x80}
 
 
 @dataclass(frozen=True)
@@ -96,7 +96,7 @@ class Telemetry:
 
 
 def decode(packet):
-    """Decode exactly Odom v4 / VelPos v2; reject unknown layouts."""
+    """Decode exactly Odom v4; reject unknown layouts."""
     p = packet.payload
     if packet.a != 0x6C:
         raise ValueError("Not a telemetry frame")
@@ -110,15 +110,7 @@ def decode(packet):
             tuple(v / 1800 for v in shorts[6:9]),
             struct.unpack_from("<2I", p, 43),
         )
-    if packet.b == 0x81 and len(p) == 35 and p[0] == 2:
-        shorts = struct.unpack_from("<7h", p, 1)
-        return Telemetry(
-            (0.0, 0.0, shorts[0] / 10000),
-            tuple(v / 5000 for v in shorts[1:4]),
-            tuple(v / 1000 for v in struct.unpack_from("<3i", p, 15)),
-            None, None, struct.unpack_from("<2I", p, 27),
-        )
-    raise ValueError("Expected Odom v4 (51 bytes) or VelPos v2 (35 bytes)")
+    raise ValueError("Expected Odom v4 (51 bytes)")
 
 
 def quaternion(rpy):

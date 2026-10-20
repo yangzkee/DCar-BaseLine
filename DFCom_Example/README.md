@@ -155,14 +155,12 @@ void Cmd_Move_Arc           (float radius_m, float dyaw_rad, float speed_mps, u8
 
 /* 订阅 Odom / VelPos 数据 */
 void Cmd_Subscribe_Odom     (u8 mode, u16 freq_hz);
-void Cmd_Subscribe_VelPos   (u8 mode, u16 freq_hz);
 ```
 
 ### ODOM 订阅模式
 
 ```c
 Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, 10);  // ★持续模式，10Hz（最常用）
-Cmd_Subscribe_VelPos(ODOM_MODE_CONTINUOUS, 10);// 简化帧，按需订阅
 Cmd_Subscribe_Odom(ODOM_MODE_ONESHOT,    1);   // 拍一帧快照
 Cmd_Subscribe_Odom(ODOM_MODE_STOP,       0);   // 停止推送
 ```
@@ -293,7 +291,6 @@ Cmd_Move_Vel(0, 0, 0);                         // 主动停车
 | 想看什么 | 看哪里 |
 |---|---|
 | 5 条 Cmd_Move_* 的帧布局 + 字段偏移 + 缩放 | `HARDWARE/DFCom_Tx.c` 每个函数前面的大块注释 |
-| 订阅 / 状态查询的协议含义 | `HARDWARE/DFCom_Tx.c::Cmd_Subscribe_Odom / Cmd_Subscribe_VelPos / Cmd_Query_DcarState` |
 | Odom v4 / VelPos v2 payload 布局 | `HARDWARE/DFCom_Rx.c::parse_odom_v4 / parse_velpos_v2` 顶部注释 |
 | ProgressBack / DcarState 解析 | `HARDWARE/DFCom_Rx.c::parse_move_progress / parse_dcar_state` |
 | 帧定界 + 校验和 + 分发逻辑 | `HARDWARE/DFCom_Rx.c::DFCom_RxParse` |

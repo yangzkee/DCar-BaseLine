@@ -203,8 +203,7 @@ static void Startup_Diagnose(void)
 {
     u32 t0;
     u32 fc_odom_before, fc_odom_after;
-    u32 fc_velpos_before, fc_velpos_after;
-    u32 diff_odom, diff_velpos, diff_total;
+    u32 diff_odom, diff_total;
 
     printf("\r\n");
     printf("============================================\r\n");
@@ -215,10 +214,9 @@ static void Startup_Diagnose(void)
     printf("[INIT] USART1 = 460800 (to DcarON)\r\n");
     printf("[INIT] USART2 = 115200 (this terminal)\r\n");
 
-    /* 步骤 1：独立订阅 Odom + VelPos（持续 10Hz） */
-    printf("[INIT] Subscribe ODOM + VelPos @ 10Hz...\r\n");
+    /* 步骤 1：独立订阅 Odom（持续 10Hz） */
+    printf("[INIT] Subscribe ODOM @ 10Hz...\r\n");
     Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
-    Cmd_Subscribe_VelPos(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
     delay_ms(150);   /* 等 ~1.5 帧, 让链路稳定 */
 
     /* 步骤 2：查询小车状态（IMU 校准 / 控制参数）*/
@@ -255,17 +253,13 @@ static void Startup_Diagnose(void)
     /* 步骤 3：等 200ms 看 telemetry 流是否在动 */
     printf("[INIT] Waiting 200ms to check telemetry flow...\r\n");
     fc_odom_before = g_odom.frame_count;
-    fc_velpos_before = g_velpos.frame_count;
     delay_ms(200);
     fc_odom_after = g_odom.frame_count;
-    fc_velpos_after = g_velpos.frame_count;
     diff_odom = fc_odom_after - fc_odom_before;
-    diff_velpos = fc_velpos_after - fc_velpos_before;
     diff_total = diff_odom + diff_velpos;
 
     if (diff_total > 0) {
-        printf("[INIT] Telemetry flowing ✓ (Odom=%lu + VelPos=%lu in 200ms)\r\n",
-               (unsigned long)diff_odom, (unsigned long)diff_velpos);
+        printf("[INIT] Odom frames: %lu\r\n", (unsigned long)diff_odom);
         printf("[INIT] ✓ All OK, sending commands...\r\n");
     } else {
         printf("[INIT] ✗ NO TELEMETRY data!\r\n");

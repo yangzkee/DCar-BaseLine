@@ -24,7 +24,7 @@ class DcaronBridge(Node):
         super().__init__("dcaron_bridge", **kwargs)
         defaults = {
             "port": "COM3", "baudrate": 460800, "robot_id": 1, "host_id": 151,
-            "telemetry": "velpos", "frequency": 10,
+            "telemetry": "odom", "publish_imu": False, "frequency": 10,
             "enable_cmd_vel": False, "cmd_timeout": 0.5,
             "max_linear_speed": 0.5, "max_angular_speed": 1.0,
             "telemetry_timeout": 2.0, "reconnect_interval": 3.0,
@@ -67,7 +67,7 @@ class DcaronBridge(Node):
         self.connected_at = 0.0
         # Reliable publishers also satisfy best-effort sensor subscribers.
         self.odom_pub = self.create_publisher(Odometry, "odom", 10)
-        self.imu_pub = self.create_publisher(Imu, "imu/data", 10) if c["telemetry"] == "odom" else None
+        self.imu_pub = self.create_publisher(Imu, "imu/data", 10) if c["publish_imu"] else None
         self.tf = TransformBroadcaster(self) if c["publish_tf"] else None
         # Keep only the newest command; never use transient-local motion commands.
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -185,7 +185,7 @@ class DcaronBridge(Node):
                     if self.cfg["enable_cmd_vel"] or self.cfg['enable_motion_actions']:
                         self.stop()
                     self.get_logger().warning(
-                        "No fresh telemetry: check wiring, stream version and license (Odom v4 requires Pro). "
+                        "No fresh telemetry: check wiring, stream version and license (Odom v4 requires Std or Pro; Mini/SE unavailable). "
                         "No stale data published; motion input inhibited.")
                     self.stale_reported = True
                 # Resubscribe on a new connection, also recovering MCU restarts.
