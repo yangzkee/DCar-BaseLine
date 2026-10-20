@@ -28,7 +28,7 @@ USART2调试口115200，PA2 TX → USB-TTL RX。车端须支持队列v6、完成
 ## 初始化与业务入口
 
 按 `USER/main.c` 的次序：初始化 → 隔离运动回包 → 发零速 → 等待1000ms → 再发零速 → 状态/VelPos诊断 → 等50ms → 开始接收业务回包 → 成功 `DFQueue_Begin` → 发动作 → 按ID等待。
-`DEMO_ENABLE_MOTION=0`默认只诊断；改1后才运行所选示例。所有运动调用都在main内。
+集成后自动诊断并持续循环操场四段，无运动开关或模式选择；每圈成功后立即开始下一圈。所有运动调用都在main内。自动同时订阅VelPos/Odom，Odom无回传时只使用VelPos；逐段与整圈验收见[根README](../README.md#stm32测试)。
 
 ```c
 u16 id;

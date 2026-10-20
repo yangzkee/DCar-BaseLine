@@ -213,7 +213,7 @@ extern u8 g_dfcom_unit_mode;   /* 默认 = DFCOM_UNIT_CM */
 /* 没有专门的 DFCom_Init —— 见 main.c::System_Init，分三步：
  *   uart_init(460800);       // USART1 接小车
  *   usart2_init(115200);     // USART2 接 USB-TTL 看 printf
- *   Odom_PrintTimer_Init();  // TIM2 维护 tick + 10Hz 自动打印VelPos
+ *   Odom_PrintTimer_Init();  // TIM2 维护 tick + 10Hz 自动打印VelPos及可用Odom
  */
 
 /* ---- 无任务ID运动接口：等待DMA可用，发送后不等运动结束。当前示例不调用。 ---- */
@@ -298,7 +298,7 @@ u8 GetMoveNotice(u8 cmd_code);
 
 /* ---- Print（DFCom_Print.c）：TIM2 中断自动调用 ---- */
 void VelPos_Print(void);            /* VelPos v2 简化版 (默认调) */
-void Odom_Print(void);              /* Odom v4 全量版 (进阶用, 默认 TIM2 里注释) */
+void Odom_Print(void);              /* Odom v4 全量版，收到新鲜回传时自动打印 */
 void Odom_PrintTimer_Init(void);    /* 启动 10Hz 自动打印 */
 
 

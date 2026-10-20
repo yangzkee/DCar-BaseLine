@@ -8,10 +8,11 @@
 int demo_main(void);
 volatile u32 g_local_tick_ms;
 volatile VelPosData_t g_velpos;
+volatile OdomData_t g_odom;
 volatile DcarState_t g_dcar_state;
 static jmp_buf finished;
 static const char *scenario;
-static unsigned submitted, waited, begun, canceled, stops, sessions;
+static unsigned submitted, waited, begun, canceled, stops, sessions, odom_subs, velpos_subs;
 
 void delay_init(void) {}
 void uart_init(u32 baud) { assert(baud == 460800); }
@@ -26,7 +27,13 @@ void delay_ms(u32 ms) {
 }
 void Cmd_Subscribe_VelPos(u8 mode, u16 hz) {
     assert(mode == ODOM_MODE_CONTINUOUS && hz == ODOM_FREQ_10HZ);
+    velpos_subs++;
     if (strcmp(scenario, "no-telemetry") != 0) g_velpos.frame_count++;
+}
+void Cmd_Subscribe_Odom(u8 mode, u16 hz) {
+    assert(mode == ODOM_MODE_CONTINUOUS && hz == ODOM_FREQ_10HZ);
+    odom_subs++;
+    if (strcmp(scenario, "with-odom") == 0) g_odom.frame_count++;
 }
 void Cmd_Query_DcarState(void) {
     if (strcmp(scenario, "no-state") != 0) g_dcar_state.received = 1;
@@ -35,6 +42,7 @@ void Cmd_Query_DcarState(void) {
 u8 DFQueue_Begin(void) {
     assert(g_dcar_state.received && g_dcar_state.imu_calibrated && g_velpos.frame_count);
     assert(g_local_tick_ms >= 4050);
+    if (begun == 3) longjmp(finished, 1); /* 三圈完成后仍自动尝试第四圈 */
     begun++;
     return strcmp(scenario, "begin-failure") != 0;
 }
@@ -44,20 +52,19 @@ static u16 task(void) {
 }
 u16 DFQueue_Linear(float x, float y, float speed, float yaw, u8 grade) {
     assert(grade == DF_ACCEL_MEDIUM && y == 0);
-    if (TEST_ROUTE == 1) assert(x == .10f && speed == .06f && yaw == 0);
-    if (TEST_ROUTE == 2) assert(x == .50f && speed == .15f && yaw == 0 && submitted % 2 == 0);
-    if (TEST_ROUTE == 3) {
+    {
         assert(x == -.60f && speed == .15f);
-        assert((submitted == 1 && yaw == 0) || (submitted == 3 && yaw > 6.28f));
+        assert((submitted % 4 == 1 && yaw == 0) || (submitted % 4 == 3 && yaw > 6.28f));
     }
     return task();
 }
 u16 DFQueue_Rotate(float yaw, float omega) {
-    assert(TEST_ROUTE == 2 && submitted % 2 == 1 && yaw > 1.57f && yaw < 1.58f && omega == .5f);
+    (void)yaw; (void)omega;
+    assert(!"stadium must not submit standalone rotation");
     return task();
 }
 u16 DFQueue_Arc(float radius, float yaw, float speed, u8 grade) {
-    assert(TEST_ROUTE == 3 && submitted % 2 == 0 && radius == .30f && yaw > 3.14f);
+    assert(submitted % 2 == 0 && radius == .30f && yaw > 3.14f);
     assert(speed == -.15f && grade == DF_ACCEL_MEDIUM);
     return task();
 }
@@ -71,22 +78,22 @@ const char *DFQueue_LastError(void) { return "simulated boundary failure"; }
 u8 DFQueue_LastNotice(void) { return 0x26; }
 
 int main(int argc, char **argv) {
-    unsigned expected = TEST_ROUTE == 1 ? 1 : TEST_ROUTE == 2 ? 8 : 4;
+    unsigned expected = 4;
     assert(argc == 2); scenario = argv[1];
     if (!setjmp(finished)) demo_main();
-    assert(stops == 2 && sessions == 2);
-    if (!TEST_ENABLED || strcmp(scenario, "no-state") == 0 ||
+    assert(stops == 2 && sessions == 2 && odom_subs == 1 && velpos_subs == 1);
+    if (strcmp(scenario, "no-state") == 0 ||
         strcmp(scenario, "no-telemetry") == 0 || strcmp(scenario, "uncalibrated") == 0) {
         assert(begun == 0 && submitted == 0 && waited == 0);
     } else if (strcmp(scenario, "begin-failure") == 0) {
         assert(begun == 1 && submitted == 0 && waited == 0 && canceled);
     } else if (strcmp(scenario, "submit-failure") == 0) {
-        assert(submitted == 1 && waited == 0 && canceled);
+        assert(submitted % 4 == 1 && waited == 0 && canceled);
     } else if (strcmp(scenario, "wait-failure") == 0) {
         assert(submitted == expected && waited == 1 && canceled);
     } else {
-        assert(begun == 1 && submitted == expected && waited == expected && !canceled);
+        assert(begun == 3 && submitted == 3*expected && waited == 3*expected && !canceled);
     }
-    puts("demo startup, route and failure behavior passed");
+    puts("continuous stadium: three laps, automatic fourth start, telemetry fallback and failure behavior passed");
     return 0;
 }

@@ -8,7 +8,7 @@
  *
  * TIM2 中断：72MHz / 72 / 1000 = 1kHz，标称1ms一次中断
  *   - 每次中断 g_local_tick_ms++
- *   - 每100次中断打印一次VelPos；printf耗时会影响本地tick精度
+ *   - 每100次中断打印VelPos，Odom新鲜时同时打印；printf耗时影响tick精度
  *
  * 学生在 USART2（USB-TTL 接 PC）终端看到的输出（坐标系 ROS REP-103）：
  *   X(fwd) = +X 前进方向 (m)        Y(left) = +Y 左方 (m)
@@ -66,8 +66,7 @@ void Odom_PrintTimer_Init(void)
  *   1. g_local_tick_ms++ (给队列超时等用)
  *   2. 每 100ms (= 10Hz) 调一次打印
  *
- * ★ 默认打印 VelPos (初学者版, 字段少看起来清爽)
- * ★ 想看完整版 (含 roll/pitch/acc/gyro), 取消 Odom_Print() 那行的注释
+ * 始终打印VelPos；Odom已收到且最近1秒内更新时一同打印，无需切换。
  * ===========================================================================*/
 void TIM2_IRQHandler(void)
 {
@@ -78,8 +77,11 @@ void TIM2_IRQHandler(void)
 
         /* 10Hz 打印 */
         if (g_print_odom_enable && (g_local_tick_ms % 100) == 0) {
-            VelPos_Print();   /* 简化版 (默认) */
-            // Odom_Print();  /* 全量进阶版 (默认注释; 取消注释即可看完整数据) */
+            VelPos_Print();
+            if (g_odom.frame_count &&
+                (u32)(g_local_tick_ms - g_odom.local_tick_ms) < 1000) {
+                Odom_Print();
+            }
         }
     }
 }
@@ -125,8 +127,9 @@ void VelPos_Print(void)
     snap.b_vel_y_mps  = g_velpos.b_vel_y_mps;
     snap.frame_count  = g_velpos.frame_count;
 
-    if (snap.frame_count == 0) {
-        printf("[VELPOS] (no data yet, send Cmd_Subscribe_VelPos?)\r\n");
+    if (snap.frame_count == 0 ||
+        (u32)(g_local_tick_ms - g_velpos.local_tick_ms) >= 1000) {
+        printf("[VELPOS] NO FRESH DATA fr=%lu\r\n", (unsigned long)snap.frame_count);
         return;
     }
 
@@ -150,7 +153,7 @@ void VelPos_Print(void)
 }
 
 /* ===========================================================================
- * Odom_Print —— 打印 Odom v4 全量数据 (默认 TIM2 里注释掉, 进阶版)
+ * Odom_Print —— 打印 Odom v4 全量数据（有新鲜回包时自动与VelPos一同打印）
  * ---------------------------------------------------------------------------
  * ★ 比 VelPos 多了什么 (适合 SLAM / 自定义滤波 / IMU 闭环)
  *
@@ -171,7 +174,7 @@ void VelPos_Print(void)
  * ★ 坐标系跟 VelPos 完全一致 (N 系 / B 系区别看 VelPos_Print 上面的注释)
  *
  * ★ 启用方式
- *   TIM2_IRQHandler 里把 `// Odom_Print();` 那行的注释去掉即可 (跟 VelPos_Print 并存)
+ *   main自动订阅，TIM2在最近1秒内有Odom回包时自动与VelPos一同打印。
  * ===========================================================================*/
 void Odom_Print(void)
 {

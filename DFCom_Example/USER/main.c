@@ -1,10 +1,10 @@
 /******************************************************************************
  * DCar STM32F103C8T6 客户端：DFLink 队列 v6。
  *
- * 从这里开始：
- *   1. 保持 DEMO_ENABLE_MOTION=0，先编译、烧录并观察 USART2 诊断日志。
- *   2. 确认车端支持队列 v6，将 DEMO_ENABLE_MOTION 改为 1。
- *   3. 选择 DEMO_ROUTE；三个示例的实际运动调用都在本文件 main() 内。
+ * 烧录后自动测试：诊断通过后等待3秒，持续循环操场路线，无模式开关。
+ * 每圈：倒行半圆 -> 后退 -> 倒行半圆 -> 后退同时旋转360度。
+ * 需要全向/麦克纳姆底盘。正常完成立即开始下一圈，失败停止，不把失败当通过。
+ * 始终订阅VelPos，同时尝试Odom；Odom有新数据时一同打印，否则只用VelPos。
  *
  * 所有 DFQueue_* 入参固定为米、弧度、m/s、rad/s。
  * 0.10f 表示 10cm，PI/2 表示 90 度；不使用 g_dfcom_unit_mode。
@@ -21,29 +21,11 @@
 #include "delay.h"
 #include "DFCom.h"
 
-#define DEMO_FORWARD 1             /* 入门：前进 0.10m */
-#define DEMO_SQUARE  2             /* 前进 0.50m + 左转90度，重复四次 */
-#define DEMO_STADIUM 3             /* 倒行操场路线，要求全向/麦克纳姆底盘 */
-
-/* 这两个配置是示例的唯一运行入口；默认仅诊断，不自动行驶。 */
-#ifndef DEMO_ENABLE_MOTION
-#define DEMO_ENABLE_MOTION 0
-#endif
-#ifndef DEMO_ROUTE
-#define DEMO_ROUTE DEMO_FORWARD
-#endif
 #define DEMO_SPEED_MPS       0.15f
 #define DEMO_GRADE           DF_ACCEL_MEDIUM
 #define DEMO_START_DELAY_MS  3000
 #define DEMO_WAIT_MS         60000
 #define DEMO_PI              3.14159265358979323846f
-
-#if DEMO_ENABLE_MOTION != 0 && DEMO_ENABLE_MOTION != 1
-#error DEMO_ENABLE_MOTION must be 0 or 1
-#endif
-#if DEMO_ROUTE < DEMO_FORWARD || DEMO_ROUTE > DEMO_STADIUM
-#error DEMO_ROUTE must be DEMO_FORWARD, DEMO_SQUARE or DEMO_STADIUM
-#endif
 
 static void System_Init(void)
 {
@@ -51,11 +33,11 @@ static void System_Init(void)
     delay_init();
     uart_init(460800);
     usart2_init(115200);
-    Odom_PrintTimer_Init();  /* TIM2 维护毫秒 tick，并默认每100ms打印 VelPos。 */
+    Odom_PrintTimer_Init();  /* TIM2 维护毫秒 tick，并每100ms打印新鲜遥测。 */
 }
 
 /* 这里只检查串口、VelPos 和校准状态；队列 v6 能力由 DFQueue_Begin 单独确认。
- * 默认订阅标准 VelPos，不要求 Pro 全量 Odom，队列动作在车端闭环执行。
+ * 始终订阅标准VelPos，同时尝试全量Odom；Odom无回传不会阻止VelPos测试。
  */
 static u8 Startup_Diagnose(void)
 {
@@ -67,6 +49,8 @@ static u8 Startup_Diagnose(void)
     printf("[INIT] car=USART1 460800; terminal=USART2 115200\r\n");
     printf("[INIT] queue units=m, rad, m/s, rad/s\r\n");
     frames_before = g_velpos.frame_count;
+    Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
+    delay_ms(20);
     Cmd_Subscribe_VelPos(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
     g_dcar_state.received = 0;
     Cmd_Query_DcarState();
@@ -93,9 +77,10 @@ static u8 Startup_Diagnose(void)
 
 int main(void)
 {
-    u16 ids[8];
+    u16 ids[4];
+    u32 lap = 0;
     u8 i;
-    u8 count = 0;
+    const u8 count = 4;
     u8 result;
     u8 diagnostic_ok;
     const char *stage = "begin";
@@ -112,41 +97,22 @@ int main(void)
     delay_ms(50);
     DFCom_MoveSessionStart();
 
-    if (!DEMO_ENABLE_MOTION) {
-        printf("[DEMO] DISABLED: set DEMO_ENABLE_MOTION=1 in USER/main.c\r\n");
-        goto idle;
-    }
     if (!diagnostic_ok) {
         printf("[DEMO] Not started: startup diagnosis failed\r\n");
         goto idle;
     }
-    printf("[DEMO] route=%u; start in %lu ms; run once\r\n",
-           (unsigned)DEMO_ROUTE, (unsigned long)DEMO_START_DELAY_MS);
+    printf("[DEMO] continuous stadium; start in %lu ms\r\n",
+           (unsigned long)DEMO_START_DELAY_MS);
     delay_ms(DEMO_START_DELAY_MS);
-    if (!DFQueue_Begin()) goto failed;
-    stage = "submit";
-
-    /* 先发动作组，每条只等入队确认；再逐条 Wait 确认车端完成。
-     * 若希望严格逐段执行，把每条 Wait 紧接在对应发送之后。
-     * ID=0 表示发送/入队失败，不能将它当成有效任务。
-     */
-    if (DEMO_ROUTE == DEMO_FORWARD) {
-        /* 最小运动示例：前进10cm，速度6cm/s，中档加速度。 */
-        ids[0] = DFQueue_Linear(0.10f, 0, 0.06f, 0, DEMO_GRADE);
-        if (!ids[0]) goto failed;
-        count = 1;
-    } else if (DEMO_ROUTE == DEMO_SQUARE) {
-        /* 每次沿当前车头前进50cm，再原地左转90度；共8条任务。 */
-        for (i = 0; i < 4; i++) {
-            ids[2*i] = DFQueue_Linear(0.50f, 0, DEMO_SPEED_MPS, 0, DEMO_GRADE);
-            if (!ids[2*i]) goto failed;
-            ids[2*i+1] = DFQueue_Rotate(DEMO_PI / 2, 0.50f);
-            if (!ids[2*i+1]) goto failed;
-        }
-        count = 8;
-    } else {
-        /* 全向底盘：倒行半圆R=30cm -> 后退60cm -> 倒行半圆 -> 后退并转360度。
-         * 最后一段在固定直线路径上同时旋转车身，不适用于普通差速底盘。
+    while (1) {
+        stage = "begin";
+        if (!DFQueue_Begin()) goto failed;
+        lap++;
+        printf("[LAP] START %lu: 1=reverse arc; 2=reverse line; 3=reverse arc; 4=reverse line+yaw\r\n",
+               (unsigned long)lap);
+        stage = "submit";
+        /* 四条任务按顺序连续入队；运动调用直接放在main内，便于修改和验收。
+         * 半径30cm、每段后退60cm；末段平移同时旋转，仅适用于全向底盘。
          */
         ids[0] = DFQueue_Arc(0.30f, DEMO_PI, -DEMO_SPEED_MPS, DEMO_GRADE);
         if (!ids[0]) goto failed;
@@ -156,19 +122,24 @@ int main(void)
         if (!ids[2]) goto failed;
         ids[3] = DFQueue_Linear(-0.60f, 0, DEMO_SPEED_MPS, 2*DEMO_PI, DEMO_GRADE);
         if (!ids[3]) goto failed;
-        count = 4;
-    }
 
-    stage = "wait";
-    for (i = 0; i < count; i++) {
-        printf("[QUEUE] waiting task=%u (%u/%u)\r\n",
-               (unsigned)ids[i], (unsigned)(i+1), (unsigned)count);
-        /* 此处是每次 Wait 的上限，不是整个动作组的总截止时间；0不表示无限等。 */
-        result = DFQueue_Wait(ids[i], DEMO_WAIT_MS);
-        if (result != DF_QUEUE_WAIT_DONE) goto failed;
+        stage = "wait";
+        for (i = 0; i < count; i++) {
+            printf("[QUEUE] lap=%lu segment=%u/4 task=%u waiting\r\n",
+                   (unsigned long)lap, (unsigned)(i+1), (unsigned)ids[i]);
+            /* 每次Wait的上限，不是整圈的总截止时间；0不表示无限等。 */
+            result = DFQueue_Wait(ids[i], DEMO_WAIT_MS);
+            if (result != DF_QUEUE_WAIT_DONE) goto failed;
+            printf("[QUEUE] lap=%lu segment=%u/4 task=%u DONE notice=0x%02X\r\n",
+                   (unsigned long)lap, (unsigned)(i+1), (unsigned)ids[i],
+                   (unsigned)DFQueue_LastNotice());
+        }
+        printf("[LAP] DONE %lu: 4 tasks completed; next lap immediately\r\n",
+               (unsigned long)lap);
+        /* 不延时、不等用户触发；完成确认后立即开始下一圈。
+         * 车端仍可能在段末减速/微调；循环运行不等于全程速度不为零。
+         */
     }
-    printf("[DEMO] DONE: %u tasks completed; no automatic repeat\r\n", (unsigned)count);
-    goto idle;
 
 failed:
     printf("[DEMO] FAILED stage=%s reason=%s notice=0x%02X\r\n",
@@ -176,6 +147,6 @@ failed:
     DFQueue_Cancel();  /* 尝试取消队列并发零速；不会自动换接口或重跑路线。 */
 idle:
     while (1) {
-        delay_ms(1000);  /* 继续接收/打印遥测，不再发送非零运动。复位可重新启动。 */
+        delay_ms(1000);  /* 故障后保留遥测，不自动重试运动；排除故障后复位。 */
     }
 }

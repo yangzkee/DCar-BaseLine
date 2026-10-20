@@ -25,7 +25,7 @@ STM32 和 ROS 2 路线使用 **DFLink 队列 v6**，Arduino 使用**无任务 ID
 
 | 目录 | 给谁用 | 包含什么 | 你需要补什么 | 建议 |
 |---|---|---|---|---|
-| [DFCom_Example](DFCom_Example/README.md) | STM32F103C8T6，想直接编译例程 | Keil 工程、标准库、启动与时钟、串口 DMA、通信核心、main 中的三条路线 | Keil、外部开发板、车端和接线 | **STM32 新手从这里开始** |
+| [DFCom_Example](DFCom_Example/README.md) | STM32F103C8T6，想直接编译例程 | Keil 工程、标准库、启动与时钟、串口 DMA、通信核心、main 中的循环操场测试 | Keil、外部开发板、车端和接线 | **STM32 新手从这里开始** |
 | [DFCom_PatchOnly](DFCom_PatchOnly/README.md) | 已有自己的 STM32 工程 | 与 Example 相同的通信核心、串口参考实现和 main 集成示例 | 自己工程的启动、时钟、库、串口收发与毫秒计时集成 | **用于移植；不能独立编译**，不是功能增强包 |
 | [DFCom_Arduino](DFCom_Arduino/README.md) | Arduino Uno / Nano（ATmega328P） | Arduino 库版和免安装库的单文件版，均带循环方形示例 | Arduino IDE、对应板卡、电平转换、支持该接口的车端 | **已有 Arduino 才选它**；不支持队列 v6 |
 | [ros2](ros2/README.md) | 用电脑或 ROS 2 控车 | 串口桥、里程计、单动作与整组轨迹 Action、YAML 路线 | ROS 2 环境和 USB-TTL | 需要 ROS 话题 / Action 时选它 |
@@ -38,13 +38,13 @@ STM32 和 ROS 2 路线使用 **DFLink 队列 v6**，Arduino 使用**无任务 ID
 
 | 平台 | 上电 / 启动后默认做什么 | 现成运动示例 | 回传与异常处理 |
 |---|---|---|---|
-| STM32 Example | 两次尝试发零速；查询状态、订阅 10Hz 标准 VelPos；打印诊断；**默认不跑路线** | 改开关后可选前进 10cm、正方形、倒行操场；运行一次，复位才再运行 | 校准和通信门禁；v6 能力及空队列握手；按任务 ID 等完成；失败记录原因并尝试取消 / 零速 |
-| STM32 PatchOnly | 集成后与 Example 相同 | 同一份 main，三种路线 | 同一份通信核心；正确运行依赖移植的中断、串口与 tick |
+| STM32 Example | 两次尝试发零速；自动查询状态、订阅 10Hz VelPos 并尝试 Odom；诊断通过后自动运动 | 固定操场四段，完成一圈立即下一圈，持续循环；无需开关或模式选择 | 校准和通信门禁；v6 能力及空队列握手；按任务 ID 等完成、逐段打印结果；失败记录原因并尝试取消 / 零速，不继续下一圈 |
+| STM32 PatchOnly | 集成后与 Example 相同 | 同一份 main，循环操场测试 | 同一份通信核心；正确运行依赖移植的中断、串口与 tick |
 | Arduino 库版 | 双停车初始化、订阅 10Hz 全量 Odom、查询校准状态并打印 | **自动循环跑 50cm 方形**：前进 + 左转 90° 共四次，等 1 秒再跑 | 解析里程计与逐条完成回包；例程只提示校准异常，未把校准 / wait 失败作为停止门禁 |
 | Arduino 单文件版 | 双停车初始化、订阅 10Hz 全量 Odom；**setup 没有查询校准状态** | 与库版相同，自动循环 | 自带解析和等待；同样未检查 wait 结果 |
 | ROS 2 | 默认只订阅 / 发布遥测，不接受运动输入 | 开启 Action 后发送单动作；square / stadium YAML 默认仅校验，加 `--execute` 才运动 | 任务结果、取消、超时、遥测失联处理；重连不重放旧目标 |
 
-STM32 正方形共 8 条任务（前进 0.50m、左转 π/2，重复四次）；操场共 4 条任务（倒行半圆 → 后退 0.60m → 倒行半圆 → 后退 0.60m 同时转 2π），后者要求全向 / 麦克纳姆底盘。
+STM32 操场每圈共 4 条任务（倒行半圆 → 后退 0.60m → 倒行半圆 → 后退 0.60m 同时转 2π），后者要求全向 / 麦克纳姆底盘。
 请求速度是上限请求，车端会按加速度、曲率和旋转能力限速，不能把它当成全程恒速保证。
 
 <a id="下载接线"></a>
@@ -68,61 +68,64 @@ cd DCar-BaseLine
 | ROS 2 | USB-TTL TX/RX 与车端 DFLink 口交叉连接；GND 共地 | 460800，8N1，3.3V TTL；直接接车，不经过 STM32 示例板 |
 
 先完成车辆激活 / 校准。STM32 / ROS 要求车端支持队列 v6 和带 ID 的完成回传；Arduino 要求 USART3 支持双向 DFLink 和无 ID 完成回传，默认 Odom 示例还需要全量 Odom 能力。
-本仓库不提供可据此确认兼容的车端固件烧录包，也没有完整的“车端固件版本号 → 能力”对照表。STM32 默认标准 VelPos 不要求 Pro 全量 Odom；Arduino 默认订阅的全量 Odom 不能据此假定可用。
+本仓库不提供可据此确认兼容的车端固件烧录包，也没有完整的“车端固件版本号 → 能力”对照表。STM32 自动同时请求 VelPos 与 Odom；Odom 无回传不阻止 VelPos 工作，不要求 Pro。Arduino 默认订阅全量 Odom，尚无自动兜底。
 
 <a id="stm32测试"></a>
 ## 4. STM32 完整例程怎么用、怎么测
 
-### 第一步：编译与烧录
+### 使用步骤：烧录后自动循环
 
 1. 使用 Keil MDK5 / ARM Compiler 5 打开 [Template.uvprojx](DFCom_Example/USER/Template.uvprojx)，Target 启用 **Use MicroLIB**。
-2. 保持 [USER/main.c](DFCom_Example/USER/main.c) 中 `DEMO_ENABLE_MOTION=0`，编译后烧录到**外部 STM32F103C8T6 板**。
-3. 按上表接线，打开 115200 调试终端，再复位外部板观察完整启动日志。
+2. 编译并烧录到外部 STM32F103C8T6 板。运动直接写在 [USER/main.c](DFCom_Example/USER/main.c)，**没有运动开关或路线模式，不需要修改宏才能启动**。
+3. 按接线表连接车辆和 115200 调试终端。车辆放在可运行操场路线的场地，完成激活 / 校准后，复位外部板。
+4. 程序自动诊断；通过后倒计时 3 秒，开始操场循环。每圈成功后立即开始下一圈，不等待按键、不复位、不添加圈间延时。需要结束测试时主动停止设备。
 
-正常编译应无错误；本仓库未附可直接替代本次编译的已验证烧录文件。
+本路线要求全向 / 麦克纳姆底盘。初次接通即可能运动；不要把“烧录完成后不动”作为预期现象。
+循环不间断指程序持续运行、无人工触发或圈间等待；车端仍会在段末减速、到位微调，不能承诺全程零停顿或恒速。
 
-### 第二步：只测通信，不跑路线
+### 自动启动与遥测现象
 
-上电约 1 秒后进行诊断；程序在最多 500ms 的诊断窗口内等待状态与新 VelPos。
-正常应看到：
+上电先尝试两次零速，约 1 秒后查询校准状态和新 VelPos；诊断窗口最多 500ms。
 
 ```text
-[INIT] state_reply=1 imu_calibrated=1 new_velpos_frames=...（应大于0）
+[INIT] state_reply=1 imu_calibrated=1 new_velpos_frames=...（大于0）
 [INIT] link and calibration OK; queue capability not checked yet
-[DEMO] DISABLED: set DEMO_ENABLE_MOTION=1 in USER/main.c
-[VELPOS] ... fr=...（后续持续增加）
+[DEMO] continuous stadium; start in 3000 ms
+[LAP] START 1: ...
+[QUEUE] lap=1 segment=1/4 task=... waiting
+[QUEUE] lap=1 segment=1/4 task=... DONE notice=0x00
+...（共四段）
+[LAP] DONE 1: 4 tasks completed; next lap immediately
+[LAP] START 2: ...
 ```
 
-通过条件：状态有回复、已校准、帧计数持续增长，车辆不自动跑路线。静止时速度应接近零；具体静止噪声阈值需按车辆规格判断。
-**`DISABLED` 单独出现不代表诊断通过**：开关关闭时即使诊断失败也会打印它；必须同时检查 `[INIT]`。
-诊断成功只证明状态 / 遥测链路和校准状态，尚未证明队列 v6 可用。
+每圈开始重新握手，要求车端支持队列 v6 且队列空闲。所有任务均在 main 内连续入队，再按 ID 等待并记录结果；每次 Wait 上限 60000ms，不是要求每圈等待 60 秒。
+诊断失败不运动；握手、提交或执行失败会打印 `FAILED stage=begin/submit/wait` 并尝试取消 / 零速，停止后续循环，不把失败伪装成完成。排除故障后复位重新开始。
 
-### 第三步：先测前进 10cm
+### 每圈四段的验收项目
 
-把 main 顶部改为：
+| 段 | 实际调用与参数 | 应观察 / 测量的现象 | 协议验收 |
+|---|---|---|---|
+| 1 | `DFQueue_Arc(0.30, π, -0.15, 18)` | 倒行半圆，半径目标 30cm，相对转角 +180°；检查倒行方向、圆弧形状与航向变化 | segment=1/4 DONE，记录 task 与 notice |
+| 2 | `DFQueue_Linear(-0.60, 0, 0.15, 0, 18)` | 沿该段起点车头反方向后退 60cm，不附加旋转；检查距离与横向偏移 | segment=2/4 DONE |
+| 3 | 与第 1 段相同 | 再倒行半圆；检查半径、转向与两段圆弧的一致性 | segment=3/4 DONE |
+| 4 | `DFQueue_Linear(-0.60, 0, 0.15, 2π, 18)` | 沿该段固定直线路径后退 60cm，同时车身正向旋转 360°；检查两种运动确实同时发生 | segment=4/4 DONE |
+| 整圈与循环 | 四段连续入队、完成后自动重复 | 顺序正确；LAP 编号递增；无需人工触发；比较多圈起终点与朝向漂移 | 每圈四条均 DONE 后才打印 LAP DONE，随后出现下一圈 START |
 
-```c
-#define DEMO_ENABLE_MOTION 1
-#define DEMO_ROUTE DEMO_FORWARD
-```
+速度请求 0.15m/s，中档加速度 18。运动参数在 main 的四条调用中直接修改，不提供另一个模式入口。
+Yaw 会在 ±180° 附近回绕：第 4 段不能只对比起终点 yaw 判定“转满一圈”，须观察连续姿态变化和真实车身旋转。
+实际距离、角度、轨迹与重复性需要外部测量；具体容差见[验收标准](#验收标准)，不能凭 DONE 保证精度。
 
-重新编译、烧录、复位。诊断通过后倒计时 3000ms，再做队列握手、提交和等待。
-正常现象：沿当前车头前进约 10cm、停止，终端出现 `[QUEUE] waiting task=... (1/1)`，随后 `[DEMO] DONE: 1 tasks completed; no automatic repeat`；不复位不会再跑。
-`waiting` 是本地正在等结果的日志，并不是车端已经完成。程序给每次 Wait 最多 60000ms，不表示运动一定需要 60 秒。
-用尺量运动前后**同一车体参考点**的位置；同时记录日志、起终点里程计和停止后速度，按[验收标准](#验收标准)判断。
+### VelPos / Odom 自动使用与验收
 
-### 第四步：再测整组路线
+- 启动自动订阅两者，均请求 10Hz。VelPos 是必需的基础数据；Odom 属于可选增强，不需要用户切换。
+- Odom 回传可用时，终端同时出现 `[VELPOS]` 和 `[ODOM]`，两种帧的 fr 均应持续增长；Odom 可额外验收姿态、加速度和陀螺仪。
+- Odom 从未回传或本地超过 1 秒未更新时，不再打印其旧值，继续使用 / 打印 VelPos；恢复收到后自动一同打印，无需复位切换。
+- VelPos 无首帧会导致启动失败；运行中超过本地 1 秒未更新打印 `NO FRESH DATA`，应判遥测验收失败，不能将旧值当成正常数据。该提示不是独立的运动失联看门狗。
+- 停车静止时速度应接近零；全量 Odom 静止平放时 acc_z 应约 +9.81m/s²，gyro_z 接近零，旋转时正向角速度为正。噪声容差按车辆规格验收。
 
-| `DEMO_ROUTE` | 参数与预期现象 | 程序完成标志 |
-|---|---|---|
-| `DEMO_FORWARD` | 前进 0.10m，请求速度 0.06m/s | `DONE: 1 tasks completed` |
-| `DEMO_SQUARE` | 当前车头方向前进 0.50m、原地左转 90°，重复四次；速度 0.15m/s，转速 0.5rad/s | `DONE: 8 tasks completed`；跑一圈即停 |
-| `DEMO_STADIUM` | 半径 0.30m 的两段倒行半圆、两段后退；末段边退边转 360°；速度 0.15m/s | `DONE: 4 tasks completed`；按四段检查，不能仅凭“像操场”验收 |
-
-完整路线速度由 `DEMO_SPEED_MPS` 控制，直线入门例程单独写为 0.06m/s；加速度 `DEMO_GRADE` 默认中档 18。
-出现 `FAILED stage=begin/submit/wait` 均判本次失败；程序尝试取消 / 零速，不自动重跑。复位只重启外部板程序，不会把车端累计位置清零。
-
-PatchOnly 使用前必须先完成[移植说明](DFCom_PatchOnly/README.md)；集成后按同样步骤测试，尤其确认等待期间串口接收与毫秒中断仍运行。
+自动 Odom 增强 / VelPos 兜底是本次 STM32 Example 与 PatchOnly 的行为；Arduino 和 ROS 的订阅方式仍按各自平台说明。
+PatchOnly 先完成[移植步骤](DFCom_PatchOnly/README.md)，之后使用相同循环和验收标准。复位外部板不清零车端累计位置。
 
 <a id="运动函数"></a>
 ## 5. 发运动要看哪些函数
@@ -153,7 +156,7 @@ STM32 先看 [main.c 的实际调用](DFCom_Example/USER/main.c)，查参数看 
 
 这些档位用于队列直线和圆弧。先提交整组再按 ID Wait 是排队；发一条立即 Wait 是逐段执行。STM32 最多同时跟踪 8 条，成功 Wait 后释放槽；更多段需要分批提交。
 
-STM32 另有无 ID 的 `Cmd_Move_Linear`、`Cmd_Move_LinearWithYaw`、`Cmd_Move_Rot`、`Cmd_Move_Arc`、`Cmd_Move_Vel`，当前路线不用它们。其单位由 `g_dfcom_unit_mode` 决定、默认厘米 / 度，profile 为 0/1/2；`WaitMoveDone` 等无 ID 完成，0 时限可无限等待。**不能混入活动队列**。持续速度 `Cmd_Move_Vel` 无自动终点、无完成回传，要主动发零速停止。
+STM32 另有无 ID 的 `Cmd_Move_Linear`、`Cmd_Move_LinearWithYaw`、`Cmd_Move_Rot`、`Cmd_Move_Arc`、`Cmd_Move_Vel`，当前操场循环不用它们。其单位由 `g_dfcom_unit_mode` 决定、默认厘米 / 度，profile 为 0/1/2；`WaitMoveDone` 等无 ID 完成，0 时限可无限等待。**不能混入活动队列**。持续速度 `Cmd_Move_Vel` 无自动终点、无完成回传，要主动发零速停止。
 
 <a id="回传函数"></a>
 ## 6. 收回传要看哪些函数和数据
@@ -181,12 +184,12 @@ STM32 另有无 ID 的 `Cmd_Move_Linear`、`Cmd_Move_LinearWithYaw`、`Cmd_Move_
 |---|---|---|
 | 查询激活 / 校准状态 | `Cmd_Query_DcarState()` | `g_dcar_state.received` 和 `.imu_calibrated`；查询只发请求，要等回包，不会替你执行校准 |
 | 连续接收简化位置 / 速度 | `Cmd_Subscribe_VelPos(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ)` | `g_velpos`；当前 main 已调用 |
-| 接收全量 IMU / 里程计 | `Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ)` | `g_odom`；需车端支持全量 Odom，当前 main 默认不订阅 |
-| 看调试日志 | `VelPos_Print()` / `Odom_Print()` | USART2 的 printf；当前 TIM2 默认约每 100ms 打印 VelPos |
+| 接收全量 IMU / 里程计 | `Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ)` | `g_odom`；需车端支持全量 Odom，当前 main 已自动订阅；无回传不阻止 VelPos 运行 |
+| 看调试日志 | `VelPos_Print()` / `Odom_Print()` | USART2 的 printf；当前 TIM2 约每 100ms 打印 VelPos，新鲜 Odom 存在时同时打印 |
 | 判断是否有新遥测 | 比较 `.frame_count` 前后值，或消费 `.fresh`；检查 `.local_tick_ms` | 帧计数应增长；只看到重复打印的旧值不能说明链路仍正常 |
 
 `g_velpos.n_pos_x_m / n_pos_y_m` 是世界系累计位置（米），`b_vel_x_mps / b_vel_y_mps` 是随车头旋转的车体系速度（m/s），`yaw_rad` 是航向角（弧度，跨 ±π 回绕）。日志 Yaw 为方便阅读转换成了度，数据字段仍是弧度。
-全量 `g_odom` 另含 roll/pitch、加速度和陀螺仪；启用它要**订阅和打印两处都配置**。停止订阅可用 `ODOM_MODE_STOP`，该实现会转为单次快照后停止；`ODOM_MODE_ONESHOT` 用于请求一帧。
+全量 `g_odom` 另含 roll/pitch、加速度和陀螺仪；当前 STM32 例程已自动订阅并按新鲜度打印，无需改订阅或打印开关。停止订阅可用 `ODOM_MODE_STOP`，该实现会转为单次快照后停止；`ODOM_MODE_ONESHOT` 用于请求一帧。
 
 接收数据由中断异步更新，直接读多个字段不是整帧原子快照；需要严格同步采样时应在自己的业务中实现一致性读取。默认 tick 与打印共用 TIM2，printf 耗时会影响本地毫秒计时精度，不用于精密性能测量。
 
@@ -258,13 +261,13 @@ if (!DFQueue_Begin()) {
 | 层次 | 操作 | 通过标准 | 不足以判通过的现象 |
 |---|---|---|---|
 | 构建 / 上传 | 编译选定目标并上传外部板，或构建 ROS 包 | 构建无错误，上传成功，启动输出对应程序 | 只有编辑器能打开源码 |
-| 双向通信 | 查询状态，连续订阅可用遥测 | 有状态回复；校准位为 1；接收帧 / 时间持续更新；没有诊断 FAIL | 只看到 TX 灯闪、固定旧值或 `DISABLED` |
-| 任务协议 | 运行一条动作，再运行整组 | STM32 所有 ID 的 Wait 返回 DONE，并打印正确任务数；ROS 最终 success=true；Arduino 自定义门禁中每次 waitDone=true | 仅入队 ACK、ROS accepted、微调中、Arduino 循环走到打印位置 |
-| 实际运动 | 地面标记起点、终点和朝向，尺量距离与角度，记录停止 | 方向和顺序符合所选路线；只运行约定次数；结束静止；外部测量误差满足事先约定的车辆 / 任务指标 | 里程计恰好显示目标值或单独出现 DONE |
+| 双向通信 | 查询状态，连续订阅可用遥测 | 有状态回复；校准位为 1；接收帧 / 时间持续更新；没有诊断 FAIL | 只看到 TX 灯闪、固定旧值 |
+| 任务协议 | 运行四段操场并观察多圈 | STM32 所有 ID 的 Wait 返回 DONE，并打印正确任务数；ROS 最终 success=true；Arduino 自定义门禁中每次 waitDone=true | 仅入队 ACK、ROS accepted、微调中、Arduino 循环走到打印位置 |
+| 实际运动 | 地面标记起点、终点和朝向，尺量距离与角度，记录停止 | 方向和顺序符合所选路线；持续自动循环；结束静止；外部测量误差满足事先约定的车辆 / 任务指标 | 里程计恰好显示目标值或单独出现 DONE |
 | 失败处理 | 在通信正常时制造可控的前置失败，例如 STM32 使用未校准车辆 | 不启动新路线，打印诊断失败；不得把未运行判成功。执行故障应看到失败结果，并在链路可用时观察停止 | 只看到程序调用 Cancel 就断定车已停 |
 
 **本仓库没有实车标定数据，也没有可承诺的统一“±几毫米 / ±几度”标准。** 不把示例距离或车端内部到位容差当成实测精度保证。
-实车测试至少记录：代码版本、平台、车端能力、底盘类型、地面 / 电量、路线参数、各任务结果 / notice、外部测量的起终点及朝向。10cm 直线从动作起点沿车头方向测，不能要求每次世界系 X 恰为 0.10m；方形要检查各段和回到起点的闭合误差，转满一圈后 yaw 可能回绕到起始值。
+实车测试至少记录：代码版本、平台、车端能力、底盘类型、地面 / 电量、路线参数、各任务结果 / notice、外部测量的起终点及朝向。各段从该段起点及起始朝向测量，不能把世界系累计位置直接当段位移；操场要检查各段与多圈重复误差，转满一圈后 yaw 可能回绕到起始值。
 若需要数值验收，在测试前按车辆规格 / 应用需求约定距离误差、角度误差、停止速度阈值和重复次数，再用外部测量判定；当前例程不自动给出这些物理验收结论。
 
 <a id="常见问题"></a>
@@ -272,7 +275,7 @@ if (!DFQueue_Begin()) {
 
 | 现象 | 检查 |
 |---|---|
-| STM32 烧录后只有日志，没有动作 | 默认 `DEMO_ENABLE_MOTION=0`；改 1 并重新编译烧录，检查诊断是否通过 |
+| STM32 烧录后只有日志，没有动作 | 当前程序应自动循环；检查诊断、校准、v6 握手及 FAILED 原因，确认烧录的是当前版本 |
 | 没有任何日志 | PA2 → USB-TTL RX、GND、115200、Use MicroLIB；Arduino 调试用 D3 / 9600 |
 | 一直打印遥测，但车端断开也没变化 | 看 fr 是否增长；打印会重复最近值，不自带遥测失联报警 |
 | `startup diagnosis failed` | 看 state_reply、imu_calibrated、new_velpos_frames；检查双向串口、校准和遥测能力 |
@@ -289,7 +292,7 @@ if (!DFQueue_Begin()) {
 
 ```text
 DFCom_Example/                 STM32 完整工程
-  USER/main.c                  配置、启动诊断和三种运动路线的实际调用
+  USER/main.c                  自动诊断与连续操场四段的实际调用
   USER/Template.uvprojx         Keil 工程入口
   HARDWARE/DFCom.h              公共 API、参数、数据结构与返回值
   HARDWARE/DFCom_Tx.c           发送组帧、队列提交 / 等待 / 取消

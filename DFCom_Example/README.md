@@ -7,7 +7,7 @@
 ## 目录
 
 - [编译与接线](#section-1)
-- [怎么启用示例](#section-2)
+- [自动循环测试](#section-2)
 - [如何改一个动作](#section-3)
 - [日志和排查](#section-4)
 
@@ -30,57 +30,31 @@
 串口为3.3V TTL。车端运动前须激活/校准，并支持队列v6。
 
 <a id="section-2"></a>
-## 怎么启用示例
+## 自动循环测试
 
-主函数顶部只有两个运行配置：
-
-```c
-#define DEMO_ENABLE_MOTION 0
-#define DEMO_ROUTE DEMO_FORWARD
-```
-
-默认0：启动时尝试停车两次，检查状态和标准VelPos回传，打印 `DISABLED`，不会跑路线。
-确认诊断通过后改为1，重新编译烧录。程序等3秒，确认v6能力和车端队列空闲，执行所选路线一次；结束后继续打印遥测，不循环跑。
-
-| 路线 | 实际动作 | 修改位置 |
-|---|---|---|
-| `DEMO_FORWARD` | 前进0.10m，速度0.06m/s | main内的单条 `DFQueue_Linear` |
-| `DEMO_SQUARE` | 前进0.50m、左转π/2，重复四次 | main内的for循环 |
-| `DEMO_STADIUM` | 两段倒行半圆及两段后退，最后边后退边转2π | main内的四条调用，要求全向底盘 |
-
-`DEMO_SPEED_MPS` 控制两条完整路线的请求速度；入门直线单独写为0.06m/s。
-`DEMO_GRADE`默认 `DF_ACCEL_MEDIUM`（18）。只要修改主函数就能看清动作；没有隐藏在头文件中的路线实现。
+无需启用开关：编译烧录后，程序自动诊断、倒计时3秒，持续循环操场路线。
+没有 `DEMO_ENABLE_MOTION` 或 `DEMO_ROUTE`，不用切换模式，也不用每圈复位。
+正常完成一圈后立即下一圈，无额外圈间等待；故障会取消/零速并停止后续循环。
+需要全向/麦克纳姆底盘，程序启动后即可能运动。
 
 <a id="section-3"></a>
 ## 如何改一个动作
 
-```c
-id = DFQueue_Linear(0.50f, 0, 0.15f, 0, DF_ACCEL_MEDIUM);  /* 前进50cm */
-id = DFQueue_Rotate(1.5707963f, 0.50f);                   /* 左转90度 */
-id = DFQueue_Arc(0.30f, 3.1415927f, -0.15f, DF_ACCEL_MEDIUM); /* 倒行半圆 */
-```
-
-这些是调用示意，实际使用须先成功 `DFQueue_Begin`、检查每个id非零，并按id等待结果。
-`DFQueue_Linear(x,y,speed,yaw,grade)`：x/y为每段起点的相对位移，speed必须为正；负x表示后退。yaw=0只平移，非零表示边平移边转向。
-`DFQueue_Rotate(yaw,omega)`：yaw正左转、负右转，omega为正。
-`DFQueue_Arc(radius,yaw,signed_speed,grade)`：半径为正，负速度倒行。
-
-先发多条再Wait就是排队；发一条立即Wait就是逐段执行。最多8个本地槽，成功Wait后释放。
-`DFQueue_Wait(id, timeout_ms)`从本次调用开始计时，0无效；返回 `DF_QUEUE_WAIT_DONE` 才能认为该任务成功。
-任务入队、到位微调、最终完成是不同状态，详见 [协议与状态说明](../docs/DFLink-v6.md)。
+四条实际调用均在main内：倒行半圆R=0.30m、转角π、速度-0.15m/s；后退0.60m；同样倒行半圆；后退0.60m同时旋转2π。
+参数固定米、弧度、m/s、rad/s，中档加速度18。修改main中的参数即可，不另设路线模式。
+每圈连续提交4个ID，再按ID等待；全部成功后开始下一圈。
+完整API、四段验收表和日志见[根README](../README.md#stm32测试)。
 
 <a id="section-4"></a>
 ## 日志和排查
 
-- `[INIT] state_reply=... imu_calibrated=... new_velpos_frames=...`：串口回包、校准、遥测是否正常。
-- `[DEMO] DISABLED`：程序主动处于只诊断模式，按提示修改main。
-- `[DEMO] FAILED stage=begin/submit/wait reason=... notice=...`：对应握手、提交、等待阶段，失败不自动重跑。
-- `[DEMO] DONE`：车端报告整组任务成功，不等于外部测量已验证轨迹精度。
-- `[VELPOS]`：位置为米、速度为m/s、打印Yaw为度；`g_velpos.yaw_rad`仍是弧度。
+- `[INIT]`：state_reply=1、imu_calibrated=1、new_velpos_frames>0 才通过启动诊断。
+- `[LAP] START n` / `[LAP] DONE n`：圈号持续递增，每圈4条任务全部成功。
+- `[QUEUE] ... segment=n/4 ... DONE notice=...`：逐段完成结果；ACK不是完成。
+- `[DEMO] FAILED stage=begin/submit/wait`：本次失败，尝试取消/零速后不再发新路线。
+- `[VELPOS]`：基础位置与速度；fr应增长。`NO FRESH DATA`为缺失/超过本地1秒未更新，不能算通信通过。
+- `[ODOM]`：启动自动尝试订阅；最近本地1秒内有更新时，与VelPos一起打印；不可用时自动保留VelPos，恢复后自动重新打印。
 
-默认仅订阅标准VelPos，不依赖Pro全量Odom。需要完整IMU时，可订阅Odom并在 `DFCom_Print.c` 选择 `Odom_Print`，还须车端支持。
-关闭打印可设置 `g_print_odom_enable=0`，不要关闭TIM2 tick；队列超时依赖tick和串口中断。
-TIM2当前在中断中打印，打印耗时会影响本地毫秒计时精度，不用于高精度主机计时。
-
-无任务ID的 `Cmd_Move_*` / `WaitMoveDone` 仍有明确声明，供独立调用场景使用，不能夹入活动队列；其单位开关不作用于本页示例。
-完整仓库入口、平台边界及检查命令见 [根README](../README.md)。
+无需手动切换Odom/VelPos。Odom可用时两种帧计数均应增长，Odom额外提供IMU数据。
+TIM2维护tick并打印，printf耗时会影响本地计时精度；遥测新鲜度不是硬件看门狗。串口断开时不能保证取消/停车请求送达。
+软件DONE只证明车端报告成功；实车各段轨迹、旋转与多圈误差仍须外部测量，验收项目见根README。
