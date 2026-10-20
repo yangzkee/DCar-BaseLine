@@ -76,7 +76,7 @@ cd DCar-BaseLine
 ### 使用步骤：烧录后自动循环
 
 1. 使用 Keil MDK5 / ARM Compiler 5 打开 [Template.uvprojx](DFCom_Example/USER/Template.uvprojx)，Target 启用 **Use MicroLIB**。
-2. 编译并烧录到外部 STM32F103C8T6 板。运动直接写在 [USER/main.c](DFCom_Example/USER/main.c)，**没有运动开关或路线模式，不需要修改宏才能启动**。
+2. 编译并烧录到外部 STM32F103C8T6 板。运动直接写在 [USER/main.c](DFCom_Example/USER/main.c)，
 3. 按接线表连接车辆和 115200 调试终端。车辆放在可运行操场路线的场地，完成激活 / 校准后，复位外部板。
 4. 程序自动诊断；通过后倒计时 3 秒，开始操场循环。每圈成功后立即开始下一圈，不等待按键、不复位、不添加圈间延时。需要结束测试时主动停止设备。
 
