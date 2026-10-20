@@ -94,7 +94,7 @@ class QueueClient:
         process, notice, task_id = struct.unpack('<BBH', packet.payload)
         if self.state == 'probe':
             if notice == 0x21:
-                if task_id < 6: raise ValueError('Beta requires queue v6 firmware; no legacy fallback')
+                if task_id < 6: raise ValueError('Queue mode requires v6 firmware; no legacy fallback')
                 self.state, self.last, self.attempts = 'sync', -1e9, 0
             return
         if self.state == 'sync':

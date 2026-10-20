@@ -1,41 +1,8 @@
-/*****************************************************************************
- * DFCom_Tx.c - 发送侧实现（SI 单位 / ROS REP-103 坐标系）
- * ---------------------------------------------------------------------------
- * 这个文件负责把"用户调用的 Cmd_Move_* 函数"打包成 DcarON DF_Link 协议帧，
- * 通过 USART1 DMA 发送到小车。
- *
- * 所有 Cmd_* 函数发完立即 return —— 不阻塞、不等回传。
- * 要等回传请用 WaitMoveDone() 辅助函数（在 DFCom_Rx.c 提供）。
- *
- *
- *  ╔════════════════════════════════════════════════════════════════════╗
- *  ║                                                                    ║
- *  ║   ★ 协议版本：SI + ROS REP-103（重要！）★                         ║
- *  ║                                                                    ║
- *  ║   所有数值字段都是 SI 单位，与老版本"工程量"完全不兼容。           ║
- *  ║                                                                    ║
- *  ║   单位:                                                            ║
- *  ║     位置 px/py        → 米 (m)                                     ║
- *  ║     速度 speed/vx/vy  → 米/秒 (m/s)                                ║
- *  ║     角度 dyaw         → 弧度 (rad)        ★ 不是 度!              ║
- *  ║     角速度 omega/vz   → 弧度/秒 (rad/s)                            ║
- *  ║                                                                    ║
- *  ║   缩放（所有 SI 值通过 ×10000 编码为 int32 LE 上线）：             ║
- *  ║     0.5 米    → 5000   (s32)                                       ║
- *  ║     0.3 m/s   → 3000   (s32)                                       ║
- *  ║     M_PI/2    → 15707  (s32) ≈ 1.5708 rad ≈ 90°                   ║
- *  ║                                                                    ║
- *  ║   坐标系（ROS REP-103）:                                           ║
- *  ║     +X = 前方 (forward)                                            ║
- *  ║     +Y = 左方 (left)                                               ║
- *  ║     +Yaw = CCW (逆时针, 从上往下看)                                ║
- *  ║                                                                    ║
- *  ║   速度范围参考:                                                    ║
- *  ║     典型使用 0.1 ~ 0.5 m/s                                         ║
- *  ║     omega_max 推荐 0.5 ~ 2.0 rad/s                                ║
- *  ║                                                                    ║
- *  ╚════════════════════════════════════════════════════════════════════╝
- *****************************************************************************/
+/* DCar发送实现。当前队列v6 API位于本文件后半段，参数固定SI。
+ * 无ID Cmd_Move_*读取单位开关，发送后不等运动完成；不能夹入活动队列。
+ * 两类接口共用组帧和DMA发送。队列回包由Rx验证后交给DFQueue_Receive。
+ * 运动S32定点编码为SI值乘10000；详见docs/DFLink-v6.md。
+ */
 #include "DFCom.h"
 #include "usart.h"
 #include "delay.h"
@@ -50,14 +17,14 @@ void DFCom_MoveCommandSendFailed(u8 cmd_code);
 #define BYTE2(v) ((u8)(((v) >> 16) & 0xFF))
 #define BYTE3(v) ((u8)(((v) >> 24) & 0xFF))
 
-/* 缩放因子（新协议：所有 SI 量都 ×10000 编 s32 LE）
+/* 运动发送缩放因子：SI量 ×10000 编s32 LE（不用于遥测缩放）
  *   位置 / 速度 / 角度 / 角速度全用这一个缩放                      */
 #define SCALE_SI     10000   /* SI 单位 → s32 (÷10000 还原) */
 
 /* ===========================================================================
  *  单位模式全局变量（参见 DFCom.h 顶部 DFCom_UnitMode_e）
  *  ---------------------------------------------------------------------------
- *  默认 = DFCOM_UNIT_CM（厘米 + 度），适合学生 / 初学者。
+ *  仅影响无任务ID的 Cmd_Move_*；DFQueue_* 固定SI，不读取本变量。
  *  想用 SI 原生单位（米 + 弧度），在 main.c 把它设成 DFCOM_UNIT_M。
  *  本文件下面 5 个 Cmd_Move_* 函数顶部会按本变量做单位转换，
  *  协议层永远只发 SI（米 / rad / ×10000 s32）。
@@ -145,51 +112,7 @@ static void put_s32_le(u8 *buf, s32 v)
 }
 
 
-/*============================================================================
- *  指令 1：直线位移 Cmd_Move_Linear  (推荐：直线移动用这个)
- *  ──────────────────────────────────────────────────────────────────────────
- *  Class/Cmd: A = 0x02 (DataRecivControClass), B = 0x64 (Motion_Linear)
- *
- *  ★ 新协议合并：把老的 Cmd_Move_Pos / Cmd_Move_VelPos 合二为一 ★
- *    小车端默认走 TRAPEZOID（梯形加减速）规划。原老版本 0x65 已停用。
- *
- *  参数（按 g_dfcom_unit_mode 解释）：
- *    CM 模式 (默认): px/py/speed 单位 = 厘米 / 厘米 / 厘米每秒
- *    M  模式:         px/py/speed 单位 = 米   / 米   / 米每秒 (SI)
- *
- *  参数语义：
- *    px:     +X 方向（前方）目标位移
- *    py:     +Y 方向（左方）目标位移
- *    speed:  最大速度
- *
- *  示例 (CM 模式, 默认):
- *    Cmd_Move_Linear(50, 0,   30, 2)   →  前进 50 cm, 峰值 30 cm/s (~0.3 m/s)
- *    Cmd_Move_Linear(0,  50,  30, 2)   →  左移 50 cm
- *    Cmd_Move_Linear(30, 30,  20, 2)   →  斜向 (前左各 30 cm), 20 cm/s
- *
- *  示例 (M 模式):
- *    Cmd_Move_Linear(0.5, 0,   0.3, 2) →  前进 0.5 m, 0.3 m/s
- *    Cmd_Move_Linear(0,   0.5, 0.3, 2) →  左移 0.5 m
- *
- *  完整帧布局（共 22 字节，注意协议层永远走 SI ×10000）：
- *
- *    偏移   字段       类型     缩放    含义
- *    ────   ────────   ──────  ──────  ───────────────────────────────────
- *    [0]    0xDF
- *    [1]    Robot_ID = 0x01
- *    [2]    PC_ID    = 0x97
- *    [3]    A = 0x02
- *    [4]    B = 0x64
- *    [5]    LEN = 13
- *    [6..9]   px       s32 LE   ×10000   px=0.5 m  → 5000 → 88 13 00 00
- *    [10..13] py       s32 LE   ×10000
- *    [14..17] speed    s32 LE   ×10000   speed=0.3 → 3000 → B8 0B 00 00
- *    [18]   profile  u8       0=匀速, 1=梯形, 2=高精度
- *    [19]   0xFD
- *    [20..21] checksum u16 LE
- *
- *  完成回传：A=0x6F, B=0x64, payload=[Process(0~0xFE 或 0xFF), Notice]
- *============================================================================*/
+/* 无任务ID直线接口；单位由 g_dfcom_unit_mode 决定。payload: x,y,speed,profile。 */
 void Cmd_Move_Linear(float px, float py, float speed_mps, u8 profile)
 {
     /* ★ profile: 0=匀速, 1=梯形加减速, 2=高精度距离闭环 */
@@ -230,42 +153,7 @@ void Cmd_Move_Linear(float px, float py, float speed_mps, u8 profile)
 }
 
 
-/*============================================================================
- *  指令 2：平移+yaw 无头位移 Cmd_Move_LinearWithYaw
- *  ──────────────────────────────────────────────────────────────────────────
- *  Class/Cmd: A = 0x02, B = 0x65 (Motion_LinearWithYaw)
- *
- *  含义：在 (px, py) 平移的同时整车转动 dyaw（"无头" / "全向带转向" 模式）。
- *        小车端会规划出"边走边转"的运动，到达目标点时刚好转完。
- *
- *  参数（按 g_dfcom_unit_mode 解释）：
- *    CM 模式 (默认): px/py = cm,  dyaw = deg,  speed = cm/s
- *    M  模式:         px/py = m,   dyaw = rad,  speed = m/s (SI)
- *
- *  参数语义：
- *    px:    +X 位移
- *    py:    +Y 位移
- *    dyaw:  yaw 增量 (相对当前姿态, CCW+)
- *    speed: 平移速度
- *
- *  示例 (CM 模式, 默认):
- *    Cmd_Move_LinearWithYaw(50, 0, 90, 30)
- *      → 前进 50 cm 同时整车左转 90°, 30 cm/s
- *
- *  示例 (M 模式):
- *    Cmd_Move_LinearWithYaw(0.5, 0, 1.5708f, 0.3)
- *      → 前进 0.5 m 同时整车左转 π/2 rad, 0.3 m/s
- *
- *  完整帧布局（共 26 字节，协议层 SI ×10000）：
- *    [6..9]    px        s32 LE  ×10000
- *    [10..13]  py        s32 LE  ×10000
- *    [14..17]  dyaw_rad  s32 LE  ×10000
- *    [18..21]  speed     s32 LE  ×10000
- *    [22]      profile    u8
- *    LEN = 17
- *
- *  完成回传：A=0x6F, B=0x65
- *============================================================================*/
+/* 无任务ID平移转向；0x65 payload: x,y,yaw,speed,profile。当前队列使用扩展0x64。 */
 void Cmd_Move_LinearWithYaw(float px, float py, float dyaw_rad, float speed_mps, u8 profile)
 {
     /* ★ profile: 0=匀速, 1=梯形加减速, 2=高精度距离闭环 */
@@ -310,41 +198,7 @@ void Cmd_Move_LinearWithYaw(float px, float py, float dyaw_rad, float speed_mps,
 }
 
 
-/*============================================================================
- *  指令 3：原地旋转 Cmd_Move_Rot
- *  ──────────────────────────────────────────────────────────────────────────
- *  Class/Cmd: A = 0x02, B = 0x63 (Motion_Rotate)
- *
- *  ★★ 重要：相对旋转 + ROS CCW+ ★★
- *
- *    dyaw 是【相对于小车当前姿态】的旋转增量（不是绝对角）。
- *
- *    正负规则 (ROS REP-103):
- *      dyaw > 0  → CCW  逆时针旋转 (从上往下看, 也就是车头向左转)
- *      dyaw < 0  → CW   顺时针旋转 (车头向右转)
- *
- *  参数（按 g_dfcom_unit_mode 解释）：
- *    CM 模式 (默认): dyaw = 度 (deg),    omega_max = 度/秒 (deg/s)
- *    M  模式:         dyaw = 弧度 (rad), omega_max = 弧度/秒 (rad/s) (SI)
- *
- *  示例 (CM 模式, 默认):
- *    当前 yaw=0 → Cmd_Move_Rot( 90, 60)   → 转到 +90° (左转), 60 deg/s
- *    当前 yaw=0 → Cmd_Move_Rot(-45, 60)   → 转到 -45° (右转)
- *
- *  示例 (M 模式):
- *    当前 yaw=0 → Cmd_Move_Rot( 1.5708f, 1.0f)  → 转到 +π/2 (左转)
- *    当前 yaw=0 → Cmd_Move_Rot(-0.7854f, 1.0f)  → 转到 -π/4 (右转)
- *
- *  完整帧布局（共 17 字节，协议层 SI rad ×10000）：
- *
- *    偏移      字段           类型     缩放     含义
- *    ────      ───────────    ──────  ──────   ────────────────────────────
- *    [6..9]    dyaw_rad       s32 LE  ×10000   yaw 增量 (rad), CCW+
- *    [10..13]  omega_max      s32 LE  ×10000   最大角速度 (rad/s), >0
- *    LEN = 8
- *
- *  完成回传：A=0x6F, B=0x63
- *============================================================================*/
+/* 无任务ID原地旋转；payload: yaw,omega。正yaw逆时针，omega为正数。 */
 void Cmd_Move_Rot(float dyaw_rad, float omega_max_rad_s)
 {
     u8 buf[32];
@@ -379,41 +233,7 @@ void Cmd_Move_Rot(float dyaw_rad, float omega_max_rad_s)
 }
 
 
-/*============================================================================
- *  指令 4：持续速度 Cmd_Move_Vel（遥控连续指令，无完成回传）
- *  ──────────────────────────────────────────────────────────────────────────
- *  Class/Cmd: A = 0x02, B = 0x62 (Motion_Velocity)
- *
- *  含义：让小车按 (vx, vy) 持续移动，按 vz 持续旋转。
- *        ★ 不会自动停！想停车要主动发 Cmd_Move_Vel(0, 0, 0)
- *        ★ 此指令小车收到立即响应，没有完成回传
- *
- *  参数（按 g_dfcom_unit_mode 解释）：
- *    CM 模式 (默认): vx/vy = 厘米/秒 (cm/s),  vz = 度/秒 (deg/s)
- *    M  模式:         vx/vy = 米/秒 (m/s),     vz = 弧度/秒 (rad/s) (SI)
- *
- *  方向：
- *    vx: +X 速度，+ = 前进
- *    vy: +Y 速度，+ = 左方
- *    vz: yaw 角速度，+ = CCW 左转 (逆时针)
- *
- *  示例 (CM 模式, 默认):
- *    Cmd_Move_Vel(30, 0,  0)  →  前进 30 cm/s
- *    Cmd_Move_Vel( 0, 0, 60)  →  原地左转 60 deg/s
- *    Cmd_Move_Vel( 0, 0,  0)  →  ★ 主动停车
- *
- *  示例 (M 模式):
- *    Cmd_Move_Vel(0.3f, 0,    0)    →  前进 0.3 m/s
- *    Cmd_Move_Vel(0,    0,    1.0f) →  原地左转 1 rad/s
- *
- *  典型用法：手柄/遥控 50Hz 推杆量；或 g_odom 闭环控速。
- *
- *  完整帧布局（共 21 字节，协议层 SI ×10000）：
- *    [6..9]    vx        s32 LE  ×10000   +X 速度 (m/s)
- *    [10..13]  vy        s32 LE  ×10000   +Y 速度 (m/s)
- *    [14..17]  vz_rad_s  s32 LE  ×10000   yaw 角速度 (rad/s)
- *    LEN = 12
- *============================================================================*/
+/* 持续速度；无任务完成回包，不使用 WaitMoveDone。发(0,0,0)主动停车。 */
 void Cmd_Move_Vel(float vx_mps, float vy_mps, float vz_rad_s)
 {
     u8 buf[32];
@@ -450,49 +270,7 @@ void Cmd_Move_Vel(float vx_mps, float vy_mps, float vz_rad_s)
 }
 
 
-/*============================================================================
- *  指令 5：圆弧 Cmd_Move_Arc
- *  ──────────────────────────────────────────────────────────────────────────
- *  Class/Cmd: A = 0x02, B = 0x66 (Motion_Arc)
- *
- *  含义：小车沿圆弧路径运动，圆心在车体侧方 radius 距离处。
- *        典型用途：直线 → 圆弧 → 直线 平滑过渡，不用原地转向。
- *
- *  参数（按 g_dfcom_unit_mode 解释）：
- *    CM 模式 (默认): radius = cm, dyaw = deg, speed = cm/s
- *    M  模式:         radius = m,  dyaw = rad, speed = m/s (SI)
- *
- *  参数语义：
- *    radius:  圆弧半径, 仅取正值。小车端内部 fabsf() 取绝对值, 负号被忽略
- *    dyaw:    圆心角, CCW+。转向只看这个符号:
- *               dyaw > 0 → CCW 逆时针 (圆心在车体 +Y 左侧, 左转)
- *               dyaw < 0 → CW  顺时针 (圆心在车体 -Y 右侧, 右转)
- *    speed:   线速度, 正数
- *
- *  示例 (CM 模式, 默认):
- *    Cmd_Move_Arc(30, 90, 20)
- *      → 半径 30 cm 圆弧, 转 90° (左转), 20 cm/s
- *    Cmd_Move_Arc(30, 360, 20)
- *      → 整圆 (360°)
- *
- *  示例 (M 模式):
- *    Cmd_Move_Arc(0.3f, 1.5708f, 0.2f)
- *      → 半径 0.3 m 圆弧, 转 π/2 rad (左转), 0.2 m/s
- *
- *  参数范围 (M 模式):
- *    • radius: 物理上限别太小 (< 0.1 m 实际跑不出来)
- *    • dyaw:   |dyaw| < M_PI (3.14)，不要正好 ±M_PI
- *    • speed:  0.05 ~ 0.5 之间比较好
- *
- *  完整帧布局（共 22 字节，协议层 SI ×10000）：
- *    [6..9]    radius_m  s32 LE  ×10000   圆弧半径 (m)
- *    [10..13]  dyaw_rad  s32 LE  ×10000   圆心角 (rad), CCW+
- *    [14..17]  speed     s32 LE  ×10000   线速度 (m/s), >0
- *    [18]      profile   u8
- *    LEN = 13
- *
- *  完成回传：A=0x6F, B=0x66
- *============================================================================*/
+/* 无任务ID圆弧；payload: radius,yaw,speed,profile；单位由 g_dfcom_unit_mode 决定。 */
 void Cmd_Move_Arc(float radius_m, float dyaw_rad, float speed_mps, u8 profile)
 {
     /* ★ profile: 0=匀速, 1=梯形加减速, 2=高精度距离闭环 */
@@ -624,128 +402,299 @@ void Cmd_Query_DcarState(void)
     send_frame(buf, cnt);
 }
 
-/* Beta queue v6. Static bounded state; no heap, no ISR logging. */
+/* ===========================================================================
+ * 队列 v6：应用调用 DFQueue_*，接收中断经 DFQueue_Receive 更新任务状态。
+ * 共享本文件的组帧/DMA发送函数。使用固定8槽，无堆内存；仅接收函数在中断调用。
+ * 与前面的无任务ID Cmd_Move_* 编码不同，单位固定为 SI。
+ * ===========================================================================*/
 #include <math.h>
 #include <string.h>
-extern volatile u32 g_local_tick_ms;
-typedef struct { volatile u16 id; volatile u8 process,notice,received; } DFQueueSlot;
-static DFQueueSlot q_slots[8];
+
+typedef struct {
+    volatile u16 id;
+    volatile u8 process;
+    volatile u8 notice;
+    volatile u8 received;
+} DFQueueSlot;
+
+static DFQueueSlot q_slots[DF_QUEUE_MAX_TASKS];
 static volatile u16 q_query_id;
-static volatile u8 q_query_notice,q_query_process,q_query_ready;
+static volatile u8 q_query_notice;
+static volatile u8 q_query_process;
+static volatile u8 q_query_ready;
 static volatile u8 q_enabled;
 static u16 q_next;
-static void q_manage(u8 op,u16 id) {
-    u8 b[12],n=(op==5)?3:1;
-    build_header(b,2,0x85);b[5]=n;b[6]=op;
-    if(n==3){b[7]=(u8)id;b[8]=(u8)(id>>8);}
-    send_frame(b,finalize_frame(b,n));
-}
-void DFQueue_Receive(const u8 *p,u8 len) {
-    u8 i;u16 id;
-    if(len!=4)return;
-    id=(u16)p[2]|((u16)p[3]<<8);
-    if(p[1]==0x21 || p[1]==0x28){
-        q_query_id=id;q_query_notice=p[1];q_query_process=p[0];q_query_ready=1;return;
+static const char *q_error = "none";
+static u8 q_last_notice;
+
+const char *DFQueue_LastError(void) { return q_error; }
+u8 DFQueue_LastNotice(void) { return q_last_notice; }
+
+/* 管理帧：0查能力、7查下一ID、5查指定结果、4取消。 */
+static u8 q_manage(u8 operation, u16 id)
+{
+    u8 frame[12];
+    u8 length = (operation == 5) ? 3 : 1;
+    build_header(frame, 2, 0x85);
+    frame[5] = length;
+    frame[6] = operation;
+    if (length == 3) {
+        frame[7] = (u8)id;
+        frame[8] = (u8)(id >> 8);
     }
-    if(!q_enabled || !id)return;
-    for(i=0;i<8;i++)if(q_slots[i].id==id){
-        /* Terminal is sticky: late ACK/progress cannot reopen a completed task. */
-        if(q_slots[i].received && q_slots[i].process==255 && q_slots[i].notice!=0x11)return;
-        q_slots[i].process=p[0];q_slots[i].notice=p[1];q_slots[i].received=1;return;
-    }
+    return send_frame(frame, finalize_frame(frame, length));
 }
-static u8 q_query(u8 op,u8 notice) {
-    u8 attempt;u32 start;
-    for(attempt=0;attempt<3;attempt++){
-        q_query_ready=0;q_manage(op,0);start=g_local_tick_ms;
-        while((u32)(g_local_tick_ms-start)<500){
-            if(q_query_ready && q_query_notice==notice)return 1;
-            delay_ms(1);
-        }
-    }
-    return 0;
-}
-u8 DFQueue_Begin(void) {
+
+void DFQueue_Receive(const u8 *payload, u8 length)
+{
     u8 i;
-    /* Refuse to discard outstanding local identities. */
-    for(i=0;i<8;i++)if(q_slots[i].id && (!q_slots[i].received || q_slots[i].process!=255))return 0;
-    q_enabled=0;
-    if(!q_query(0,0x21) || q_query_id<6)return 0;
-    if(!q_query(7,0x28) || !q_query_id || q_query_process!=16)return 0;
-    memset(q_slots,0,sizeof(q_slots));q_next=q_query_id;q_enabled=1;return 1;
-}
-void DFQueue_Cancel(void) {
-    u8 b[21];
-    q_manage(4,0);
-    build_header(b,2,0x62);b[5]=12;memset(b+6,0,12);send_frame(b,finalize_frame(b,12));
-    q_enabled=0;memset(q_slots,0,sizeof(q_slots));
-}
-u8 DFQueue_Status(u16 id,u8 *process,u8 *notice) {
-    u8 i;u32 irq=__get_PRIMASK();__disable_irq();
-    for(i=0;i<8;i++)if(id && q_slots[i].id==id && q_slots[i].received){
-        *process=q_slots[i].process;*notice=q_slots[i].notice;
-        if(!irq)__enable_irq();
-        return 1;
+    u16 id;
+    if (length != 4) return;
+    id = (u16)payload[2] | ((u16)payload[3] << 8);
+    if (payload[1] == 0x21 || payload[1] == 0x28) {
+        q_query_id = id;
+        q_query_notice = payload[1];
+        q_query_process = payload[0];
+        q_query_ready = 1;
+        return;
     }
-    if(!irq)__enable_irq();
-    return 0;
+    if (!q_enabled || !id) return;  /* ID0不是某条任务的完成回包。 */
+    for (i = 0; i < DF_QUEUE_MAX_TASKS; i++) {
+        if (q_slots[i].id != id) continue;
+        /* 终态保持：重复完成、迟到ACK或进度不能重新打开已经结束的任务。
+         * 0x11是队列满，需要原ID重试，不是已完成。
+         */
+        if (q_slots[i].received && q_slots[i].process == 255 && q_slots[i].notice != 0x11) return;
+        q_slots[i].process = payload[0];
+        q_slots[i].notice = payload[1];
+        q_slots[i].received = 1;
+        return;
+    }
 }
-static u8 q_number(u8 *p,float v) {
-    double scaled=(double)v*10000.0;
-    if(!isfinite(scaled) || scaled>2147483647.0 || scaled<(-2147483647.0-1.0))return 0;
-    put_s32_le(p,(s32)scaled);return 1;
-}
-static u16 q_submit(u8 cmd,const float *values,u8 count,u8 grade) {
-    u8 b[28],i,slot=8,n=(u8)(count*4+(cmd==0x63?0:1)),attempt,process,notice;
-    u16 id;u32 start;
-    if(!q_enabled || grade<16 || grade>20)return 0;
-    for(i=0;i<8;i++)if(!q_slots[i].id){slot=i;break;}
-    if(slot==8)return 0;
-    build_header(b,2,cmd);b[5]=n+2;
-    for(i=0;i<count;i++)if(!q_number(b+6+4*i,values[i]))return 0;
-    if(cmd!=0x63)b[6+n-1]=grade;
-    id=q_next;b[6+n]=(u8)id;b[7+n]=(u8)(id>>8);
-    /* Install identity before DMA starts, including immediate interrupt reply. */
-    q_slots[slot].received=0;q_slots[slot].id=id;
-    for(attempt=0;attempt<3;attempt++){
-        send_frame(b,finalize_frame(b,n+2));start=g_local_tick_ms;
-        while((u32)(g_local_tick_ms-start)<500){
-            if(DFQueue_Status(id,&process,&notice)){
-                if(notice==0 || notice==0x10 || notice==0x25 || notice==0x27){
-                    q_next=id==65535?1:(u16)(id+1);return id;
-                }
-                if(notice!=0x11){DFQueue_Cancel();return 0;}
-            }
+
+static u8 q_query(u8 operation, u8 expected_notice)
+{
+    u8 attempt;
+    u32 start;
+    for (attempt = 0; attempt < 3; attempt++) {
+        q_query_ready = 0;
+        if (!q_manage(operation, 0)) {
+            q_error = "DMA transmission failed";
+            return 0;
+        }
+        start = g_local_tick_ms;
+        while ((u32)(g_local_tick_ms - start) < 500) {
+            if (q_query_ready && q_query_notice == expected_notice) return 1;
+            DFCom_Poll();
             delay_ms(1);
         }
     }
-    /* Ambiguous send must stop; never assign its ID to different payload. */
-    DFQueue_Cancel();return 0;
+    q_error = "queue query timed out; check link and v6 firmware";
+    return 0;
 }
-u16 DFQueue_Linear(float x,float y,float speed,float yaw,u8 grade) {
-    float v[4];if(!(speed>0))return 0;
-    v[0]=x;v[1]=y;v[2]=speed;v[3]=yaw;
-    return q_submit(0x64,v,yaw==0?3:4,grade);
+
+u8 DFQueue_Begin(void)
+{
+    u8 i;
+    q_error = "none";
+    q_last_notice = 0;
+    /* 尚有在途任务时不能重新握手丢失其身份。 */
+    for (i = 0; i < DF_QUEUE_MAX_TASKS; i++) {
+        if (q_slots[i].id && (!q_slots[i].received || q_slots[i].process != 255)) {
+            q_error = "local tasks still active; wait or cancel first";
+            return 0;
+        }
+    }
+    q_enabled = 0;
+    if (!q_query(0, 0x21)) return 0;
+    if (q_query_id < 6) {
+        q_error = "device does not support queue v6";
+        return 0;
+    }
+    if (!q_query(7, 0x28)) return 0;
+    if (!q_query_id || q_query_process != 16) {
+        q_error = "device queue is not empty or next task ID is invalid";
+        return 0;
+    }
+    memset(q_slots, 0, sizeof(q_slots));
+    q_next = q_query_id;
+    q_enabled = 1;
+    return 1;
 }
-u16 DFQueue_Rotate(float yaw,float omega) {
-    float v[2];if(!(omega>0))return 0;v[0]=yaw;v[1]=omega;return q_submit(0x63,v,2,18);
+
+void DFQueue_Cancel(void)
+{
+    u8 frame[21];
+    /* 两个发送都是尽力而为，断线时不能确认车端已停车。
+     * 保留最近错误，供调用者打印；取消后下一批必须重新 Begin。
+     */
+    q_manage(4, 0);
+    build_header(frame, 2, 0x62);
+    frame[5] = 12;
+    memset(frame + 6, 0, 12);
+    send_frame(frame, finalize_frame(frame, 12));
+    q_enabled = 0;
+    memset(q_slots, 0, sizeof(q_slots));
 }
-u16 DFQueue_Arc(float radius,float yaw,float speed,u8 grade) {
-    float v[3];if(!(radius>0) || speed==0)return 0;
-    v[0]=radius;v[1]=yaw;v[2]=speed;return q_submit(0x66,v,3,grade);
-}
-u8 DFQueue_Wait(u16 id,u32 timeout_ms) {
-    u32 start=g_local_tick_ms,last=start;u8 p,n,i,found=0;
-    for(i=0;i<8;i++)if(id && q_slots[i].id==id)found=1;
-    if(!found || !timeout_ms)return 2;
-    while((u32)(g_local_tick_ms-start)<timeout_ms){
-        if(DFQueue_Status(id,&p,&n) && p==255 && n!=0x11){
-            if(n!=0 && n!=0x27){DFQueue_Cancel();return 3;}
-            for(i=0;i<8;i++)if(q_slots[i].id==id)q_slots[i].id=0;
+
+u8 DFQueue_Status(u16 id, u8 *process, u8 *notice)
+{
+    u8 i;
+    u32 irq;
+    if (!process || !notice) return 0;
+    irq = __get_PRIMASK();
+    __disable_irq();
+    for (i = 0; i < DF_QUEUE_MAX_TASKS; i++) {
+        if (id && q_slots[i].id == id && q_slots[i].received) {
+            *process = q_slots[i].process;
+            *notice = q_slots[i].notice;
+            if (!irq) __enable_irq();
             return 1;
         }
-        if((u32)(g_local_tick_ms-last)>=500){q_manage(5,id);last=g_local_tick_ms;}
+    }
+    if (!irq) __enable_irq();
+    return 0;
+}
+
+static u8 q_number(u8 *destination, float value)
+{
+    double scaled = (double)value * 10000.0;
+    if (!isfinite(scaled) || scaled > 2147483647.0 || scaled < (-2147483647.0 - 1.0)) return 0;
+    put_s32_le(destination, (s32)scaled);
+    return 1;
+}
+
+static u16 q_submit(u8 command, const float *values, u8 count, u8 grade)
+{
+    u8 frame[28];
+    u8 i;
+    u8 slot = DF_QUEUE_MAX_TASKS;
+    u8 length = (u8)(count * 4 + (command == CMD_ROT ? 0 : 1));
+    u8 attempt;
+    u8 process;
+    u8 notice;
+    u16 id;
+    u32 start;
+    q_error = "none";
+    q_last_notice = 0;
+    if (!q_enabled) {
+        q_error = "call DFQueue_Begin successfully before submitting";
+        return 0;
+    }
+    if (grade < DF_ACCEL_VERY_LOW || grade > DF_ACCEL_VERY_HIGH) {
+        q_error = "acceleration grade must be 16..20";
+        return 0;
+    }
+    for (i = 0; i < DF_QUEUE_MAX_TASKS; i++) {
+        if (!q_slots[i].id) { slot = i; break; }
+    }
+    if (slot == DF_QUEUE_MAX_TASKS) {
+        q_error = "8 local task slots used; consume completed results with Wait";
+        return 0;
+    }
+    build_header(frame, 2, command);
+    frame[5] = length + 2;
+    for (i = 0; i < count; i++) {
+        if (!q_number(frame + 6 + 4*i, values[i])) {
+            q_error = "motion parameter is nonfinite or outside S32 fixed-point range";
+            return 0;
+        }
+    }
+    if (command != CMD_ROT) frame[6 + length - 1] = grade;
+    id = q_next;
+    frame[6 + length] = (u8)id;
+    frame[7 + length] = (u8)(id >> 8);
+    /* 先登记ID再启动DMA，保证极快的中断回包也能找到任务。 */
+    q_slots[slot].received = 0;
+    q_slots[slot].id = id;
+    for (attempt = 0; attempt < 3; attempt++) {
+        if (!send_frame(frame, finalize_frame(frame, length + 2))) {
+            q_error = "DMA transmission failed";
+            DFQueue_Cancel();
+            return 0;
+        }
+        start = g_local_tick_ms;
+        while ((u32)(g_local_tick_ms - start) < 500) {
+            if (DFQueue_Status(id, &process, &notice)) {
+                if (notice == 0 || notice == 0x10 || notice == 0x25 || notice == 0x27) {
+                    q_next = id == 65535 ? 1 : (u16)(id + 1);
+                    return id;  /* 入队确认或后续状态，不表示动作已结束。 */
+                }
+                if (notice != 0x11) {
+                    q_last_notice = notice;
+                    q_error = "device rejected submitted task";
+                    DFQueue_Cancel();
+                    return 0;
+                }
+            }
+            DFCom_Poll();
+            delay_ms(1);
+        }
+        /* ACK丢失或队列满：重发完全相同的ID和字节，不消耗新编号。 */
+    }
+    q_error = "task admission timed out or device queue stayed full";
+    DFQueue_Cancel();
+    return 0;
+}
+
+u16 DFQueue_Linear(float x, float y, float speed, float yaw, u8 grade)
+{
+    float values[4];
+    if (!(speed > 0)) { q_error = "linear speed must be positive"; q_last_notice = 0; return 0; }
+    values[0] = x; values[1] = y; values[2] = speed; values[3] = yaw;
+    /* 普通直线和带旋转直线都用0x64，yaw非零时才扩展payload。 */
+    return q_submit(CMD_LINEAR, values, yaw == 0 ? 3 : 4, grade);
+}
+
+u16 DFQueue_Rotate(float yaw, float omega)
+{
+    float values[2];
+    if (!(omega > 0)) { q_error = "angular speed must be positive"; q_last_notice = 0; return 0; }
+    values[0] = yaw; values[1] = omega;
+    /* 原地旋转帧不含加速度档位。 */
+    return q_submit(CMD_ROT, values, 2, DF_ACCEL_MEDIUM);
+}
+
+u16 DFQueue_Arc(float radius, float yaw, float speed, u8 grade)
+{
+    float values[3];
+    if (!(radius > 0) || speed == 0) { q_error = "arc radius must be positive and speed nonzero"; q_last_notice = 0; return 0; }
+    values[0] = radius; values[1] = yaw; values[2] = speed;
+    return q_submit(CMD_ARC, values, 3, grade);
+}
+
+u8 DFQueue_Wait(u16 id, u32 timeout_ms)
+{
+    u32 start = g_local_tick_ms;
+    u32 last = start;
+    u8 process;
+    u8 notice;
+    u8 i;
+    u8 found = 0;
+    q_error = "none";
+    q_last_notice = 0;
+    for (i = 0; i < DF_QUEUE_MAX_TASKS; i++) if (id && q_slots[i].id == id) found = 1;
+    if (!found || !timeout_ms) {
+        q_error = "unknown task ID or zero wait timeout";
+        return DF_QUEUE_WAIT_TIMEOUT;
+    }
+    while ((u32)(g_local_tick_ms - start) < timeout_ms) {
+        if (DFQueue_Status(id, &process, &notice) && process == 255 && notice != 0x11) {
+            q_last_notice = notice;
+            if (notice != 0 && notice != 0x27) {
+                q_error = "device reported task failure";
+                DFQueue_Cancel();
+                return DF_QUEUE_WAIT_FAULT;
+            }
+            for (i = 0; i < DF_QUEUE_MAX_TASKS; i++) if (q_slots[i].id == id) q_slots[i].id = 0;
+            return DF_QUEUE_WAIT_DONE;
+        }
+        /* 已入队任务丢失终止帧时查结果，不重复创建运动。 */
+        if ((u32)(g_local_tick_ms - last) >= 500) { q_manage(5, id); last = g_local_tick_ms; }
+        DFCom_Poll();
         delay_ms(1);
     }
-    DFQueue_Cancel();return 2;
+    q_error = "task completion timed out; cancellation attempted";
+    DFQueue_Cancel();
+    return DF_QUEUE_WAIT_TIMEOUT;
 }

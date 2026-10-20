@@ -1,22 +1,4 @@
-/******************************************************************************
- * DFCom_Print.c - 终端打印 + 本地 tick
- * ---------------------------------------------------------------------------
- * 提供两个东西：
- *   1. g_local_tick_ms：本地毫秒计数（TIM2 1ms 中断维护，给 WaitMoveDone 等用）
- *   2. Odom_Print()：把 g_odom 打到 USART2（printf 已重定向到 USART2）
- *      TIM2 计数到 100ms 时自动调用一次（10Hz 刷屏）
- *
- * TIM2 中断：72MHz / 7200 = 10kHz 计数器，1ms 一次中断
- *   - 每次中断 g_local_tick_ms++
- *   - 每 100 次中断（100ms） Odom_Print() 一次
- *
- * 学生在 USART2（USB-TTL 接 PC）终端看到的输出（坐标系 ROS REP-103）：
- *   X(fwd) = +X 前进方向 (m)        Y(left) = +Y 左方 (m)
- *   Yaw 协议层是弧度 (rad)，但终端打印转成度 (deg) 学生看着方便，CCW+ 逆时针为正
- *
- *   [ODOM] Yaw=  0.12 X(fwd)= 0.000 Y(left)= 0.000 Vx(fwd)= 0.00 Vy(left)= 0.00 fr=10
- *   [ODOM] Yaw=  0.15 X(fwd)= 0.024 Y(left)= 0.000 Vx(fwd)= 0.25 Vy(left)= 0.00 fr=11
- ******************************************************************************/
+/* TIM2只维护1ms时基；DFCom_Poll在主循环调度日志，USART2非阻塞发送。 */
 #include "DFCom.h"
 #include "stm32f10x.h"
 #include "usart.h"
@@ -27,12 +9,13 @@ volatile u32 g_local_tick_ms = 0;
 
 /* ---- 控制是否自动打印（学生可以临时关掉） ---- */
 volatile u8 g_print_odom_enable = 1;
+volatile u8 g_print_full_odom_enable = 1;
 
 /* ===========================================================================
  * TIM2 初始化：1ms 中断
  *   APB1 = 36MHz, TIM2 计数频率 = 72MHz / Prescaler
- *   设 Prescaler = 7200 - 1, Period = 10 - 1 → 10kHz/10 = 1kHz = 1ms
- *   (或者 Prescaler=72-1, Period=1000-1，也是 1ms，原理一样)
+ *   实际Prescaler=72-1，Period=1000-1，1MHz/1000=1kHz
+ *   不在TIM2中断内打印。
  * ===========================================================================*/
 void Odom_PrintTimer_Init(void)
 {
@@ -61,18 +44,38 @@ void Odom_PrintTimer_Init(void)
     TIM_Cmd(TIM2, ENABLE);
 }
 
-
+/* 中断不调用printf，不访问USART2，不依赖任何遥测开关。 */
 void TIM2_IRQHandler(void)
 {
     if (TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET) {
         TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
-
         g_local_tick_ms++;
+    }
+}
 
-        /* 10Hz 打印 */
-        if (g_print_odom_enable && (g_local_tick_ms % 100) == 0) {
-            Odom_Print();   /* 统一 Odom：Std 基础字段，Pro 完整字段 */
-        }
+/* 仅从主循环调用；错过的日志不补打，避免积压影响运动任务。 */
+void DFCom_Poll(void)
+{
+    static u32 last_print, last_diag;
+    u32 now;
+    USART1_ReceivePoll(); /* 必须在日志开关检查之前，关闭日志仍持续收帧。 */
+    now = g_local_tick_ms;
+    if (!g_print_odom_enable) return;
+    if ((u32)(now - last_print) >= 100) {
+        last_print = now;
+        if (g_print_full_odom_enable && g_odom.frame_count &&
+            (u32)(now - g_odom.local_tick_ms) < 1000) Odom_Print();
+    }
+    if ((u32)(now - last_diag) >= 1000) {
+        last_diag = now;
+        printf("[UART1] bytes=%lu dropped=%lu overflows=%lu errors=%lu\r\n",
+               (unsigned long)g_usart1_rx_bytes, (unsigned long)g_usart1_rx_dropped,
+               (unsigned long)g_usart1_rx_overflows, (unsigned long)g_usart1_rx_errors);
+        printf("[RX] odom wire=%lu ok=%lu reject=%lu len=%u ver=%u; "
+               "\r\n",
+               (unsigned long)g_dfcom_rx_diag.odom_wire, (unsigned long)g_odom.frame_count,
+               (unsigned long)g_dfcom_rx_diag.odom_rejected,
+               (unsigned)g_dfcom_rx_diag.odom_len, (unsigned)g_dfcom_rx_diag.odom_version);
     }
 }
 

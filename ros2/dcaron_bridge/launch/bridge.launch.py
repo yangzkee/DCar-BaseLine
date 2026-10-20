@@ -14,7 +14,6 @@ def generate_launch_description():
         DeclareLaunchArgument("params_file", default_value=config),
         DeclareLaunchArgument("namespace", default_value=""),
         DeclareLaunchArgument("port", default_value="COM3"),
-        DeclareLaunchArgument("telemetry", default_value="odom"),
         DeclareLaunchArgument("enable_cmd_vel", default_value="false"),
         DeclareLaunchArgument("enable_motion_actions", default_value="false"),
         Node(
@@ -22,7 +21,6 @@ def generate_launch_description():
             namespace=LaunchConfiguration("namespace"), output="screen",
             parameters=[LaunchConfiguration("params_file"), {
                 "port": ParameterValue(LaunchConfiguration("port"), value_type=str),
-                "telemetry": ParameterValue(LaunchConfiguration("telemetry"), value_type=str),
                 "enable_cmd_vel": ParameterValue(LaunchConfiguration("enable_cmd_vel"), value_type=bool),
                 "enable_motion_actions": ParameterValue(LaunchConfiguration("enable_motion_actions"), value_type=bool),
             }],

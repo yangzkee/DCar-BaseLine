@@ -10,6 +10,9 @@ typedef int16_t  s16;
 typedef uint32_t u32;
 typedef int32_t  s32;
 
+#define NVIC_PriorityGroup_2 2
+static inline void NVIC_PriorityGroupConfig(u32 group) { (void)group; }
+
 static inline u32 __get_PRIMASK(void) { return 0; }
 static inline void __disable_irq(void) {}
 static inline void __enable_irq(void) {}

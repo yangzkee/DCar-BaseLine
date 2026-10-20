@@ -1,4 +1,4 @@
-"""Bounded DFLink motions and replies; independently testable without ROS."""
+"""Shared motion values plus untagged/cross-marker encoders. Queue v6 encoding lives in queue.py."""
 from dataclasses import dataclass
 import math
 import struct
@@ -19,7 +19,7 @@ class MotionSpec:
     speed: float = 0.0
     angular_speed: float = 0.0
     radius: float = 0.0
-    profile: int = 1
+    profile: int = 1  # Untagged encoder default; queue callers must supply 16..20.
     mode: int = 0
     next_command: int = 0
     timeout: float = 0.0
@@ -32,7 +32,7 @@ def fixed(*values):
 
 
 def motion_frames(spec, target=1, source=151):
-    """Return one write; NEXT's two frames must be adjacent on the serial wire."""
+    """Encode untagged motion; NEXT's two frames stay adjacent. Not the queue encoder."""
     if spec.command not in COMMANDS or spec.profile not in (0, 1, 2) or spec.mode not in (0, 1):
         raise ValueError('Unknown motion, profile or mode')
     fixed(spec.x, spec.y, spec.yaw, spec.speed, spec.angular_speed, spec.radius)

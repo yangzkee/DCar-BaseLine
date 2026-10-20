@@ -27,10 +27,8 @@ class MotionActions:
             goal_callback=self.admit, cancel_callback=lambda goal: CancelResponse.ACCEPT,
             callback_group=ReentrantCallbackGroup())
 
-    def fresh(self):
-        b = self.bridge
-        return (b.port is not None and b.last_rx is not None and
-                time.monotonic() - b.last_rx < b.cfg['telemetry_timeout'])
+    def connected(self):
+        return self.bridge.port is not None
 
     @staticmethod
     def spec(request):
@@ -44,8 +42,8 @@ class MotionActions:
             else: validate_limits(spec, b.cfg)
             if self.reserved or self.active is not None:
                 raise ValueError('Another motion is active; wait for result or cancel it')
-            if not self.fresh():
-                raise ValueError('No fresh telemetry')
+            if not self.connected():
+                raise ValueError('Serial disconnected')
             if not self.use_queue(spec) and spec.command in self.quarantine.pending:
                 raise ValueError('Old terminal reply unresolved for this command; do not guess completion')
         except ValueError as exc:
@@ -59,8 +57,8 @@ class MotionActions:
 
     def admit_trajectory(self, request):
         try:
-            if self.reserved or self.active is not None or not self.fresh():
-                raise ValueError('Busy or no fresh telemetry')
+            if self.reserved or self.active is not None or not self.connected():
+                raise ValueError('Busy or serial disconnected')
             if not 1 <= len(request.segments) <= 128: raise ValueError('Use 1..128 segments')
             import math
             if not math.isfinite(request.timeout) or not 0 <= request.timeout <= self.bridge.cfg['max_motion_timeout']:
@@ -89,8 +87,8 @@ class MotionActions:
         try:
             if handle.is_cancel_requested:
                 self.finish('canceled', 254, 'Canceled before transmission')
-            elif not self.fresh():
-                self.finish('aborted', 254, 'Connection/telemetry lost before transmission')
+            elif not self.connected():
+                self.finish('aborted', 254, 'Serial disconnected before transmission')
             else:
                 b.watchdog.reset()  # Bounded moves are governed by their own deadline.
                 self.active['sent'] = True

@@ -1,6 +1,6 @@
 """DFLink V3 wire contract. No ROS or serial dependencies.
 
-Reference: repository DFLink_V3协议手册_对外版.md, sections 2, 5 and 7.
+Reference: docs/DFLink-v6.md (common framing, velocity and telemetry).
 """
 
 from dataclasses import dataclass

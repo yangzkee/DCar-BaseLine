@@ -1,106 +1,79 @@
-> Beta 连续队列 v6 的字段、任务 ID 与完成语义以 [Beta 通信说明](../../docs/Beta_通信与示例_2026-10-19.md) 为准；下文保留旧协议参考。
+# 当前运动接口与轨迹格式
 
-# 运动 Action 与轨迹组合（0.2）
+默认 `motion_protocol: queue`，运动能力为DFLink队列v6。先阅读 [ROS快速开始](../README.md)。
+所有输入使用m、rad、m/s、rad/s；位移与转角相对每段起点，正X前、正Y左、正yaw逆时针。
 
-同一个 GitHub 仓库包含 STM32F1、Arduino 和 ROS 2 客户端。ROS 目录下分为两个
-**包**：`dcaron_interfaces` 只定义一个 Action，`dcaron_bridge` 负责串口与执行；
-它们不是两个 Git 仓库，也不包含新的底盘固件。
+## 持续操场测试
 
-采用 ROS 原生 Action，区分“已接受、执行中、成功、失败、取消”。连续速度仍走
-`cmd_vel`；有终点的动作走 `motion`，只有 MCU 正常终止回包才成功。
+`ros2 launch dcaron_bridge stadium_test.launch.py port:=COM5` 同时启动桥接和持续操场客户端。
+每圈四段入队、整圈成功后立即下一圈，任一圈失败结束测试；不需额外执行参数或切换模式。
+Odom、VelPos和状态仅独立报告，不作为运动启动条件；任务握手、ACK/DONE与自身超时必须通过。
+下方单动作和YAML入口用于自定义应用。
 
-## 命令映射
+## 单动作 /motion
 
-| command | 名称 | Goal 使用字段 | 固件语义 |
-|---|---|---|---|
-| 99 / 0x63 | ROTATE | yaw、angular_speed | 相对旋转，正值逆时针 |
-| 100 / 0x64 | LINEAR | x、y、speed、profile | 相对位移，profile 0匀速/1梯形/2距离闭环 |
-| 101 / 0x65 | LINEAR_WITH_YAW | x、y、yaw、speed、profile | 平移并转向；固件当前强制匀速 |
-| 102 / 0x66 | ARC | radius、yaw、speed、profile | 半径正值，yaw 正负决定转向；固件当前强制匀速 |
-| 128 / 0x80 | CROSS_RECORD | mode | 0 FIRST / 1 NEXT，均立即 FULL，回捕获位姿 |
-| 129 / 0x81 | CROSS_LOCALIZE | mode、可选 next_command 和位移字段 | FIRST 立即 FULL；NEXT 紧邻绑定一次直线 |
+| command | 含义 | 必填运动字段 |
+|---|---|---|
+| 99 / 0x63 | 原地旋转 | yaw、正angular_speed、profile |
+| 100 / 0x64 | 直线或平移并转向 | x/y、正speed、profile；需要同时旋转时填yaw |
+| 101 / 0x65 | 平移转向输入别名 | x/y、yaw、正speed、profile；线上编码仍是0x64 |
+| 102 / 0x66 | 圆弧 | 正radius、yaw、非零speed、profile；负speed倒行 |
 
-位置 m、速度 m/s、角度 rad、角速度 rad/s。x/y/yaw 相对本条命令起点，
-不是全局绝对坐标。差速底盘不支持横移，具体能力由底盘决定。
-Action 消息字段默认 0，所以 CLI 要显式写 profile（若需梯形则为 1）；
-轨迹 YAML 示例客户端的缺省 profile 是 1，与 MCU 省略 profile 的默认一致。
+profile必须显式填16/17/18/19/20，示例用18。旋转帧不发送该字段，但ROS输入仍校验它。
+timeout单位秒，0使用配置的motion_timeout，正值不能超过max_motion_timeout。
 
-## 启动与发送旋转
-
-完成两包构建并激活 ROS 与工作区，在一个终端运行：
+前进10cm：
 
 ```text
-ros2 launch dcaron_bridge bridge.launch.py port:=COM5 enable_motion_actions:=true
+ros2 action send_goal /motion dcaron_interfaces/action/Motion "{command: 100, x: 0.1, speed: 0.06, profile: 18, timeout: 10.0}" --feedback
 ```
 
-另一终端发送 15° 左转，最大角速度 0.2rad/s，等待进度和结果：
+原地左转90°：
 
 ```text
-ros2 action send_goal /motion dcaron_interfaces/action/Motion "{command: 99, yaw: 0.2617993878, angular_speed: 0.2, timeout: 8.0}" --feedback
+ros2 action send_goal /motion dcaron_interfaces/action/Motion "{command: 99, yaw: 1.5707963268, angular_speed: 0.5, profile: 18, timeout: 10.0}" --feedback
 ```
 
-参数 `enable_motion_actions` 与 `enable_cmd_vel` 独立，均默认关闭。
-如同时开启，任何收到的有效 cmd_vel 会打断当前 Action；非有限/超限速度会打断
-并发零。不要让后台速度发布器和轨迹客户端同时争用控制。
+## 整组 /trajectory
 
-## 轨迹逐段执行
+Goal包含 `segments`（1..128个MotionSegment）、`sequential`（默认false）、`timeout`（整组秒数，0用节点默认值）。
+默认最多8条在途；每条发送等入队确认，不等完成即可继续填队列。sequential=true时每段成功才发下一段。
+Feedback包含task_id、segment_index（从0计）、process、notice和percent；Result包含success、notice、message和completed（成功段数）。
 
-`examples/rotation_probe.yaml` 和 `examples/square.yaml` 是可读的步骤列表。
-每段成功后才发下一段；拒绝、取消、失败或超时立即停止序列。
-从 `ros2` 目录（已激活安装环境）运行：
+`trajectory_sequence`使用这样的YAML：
 
-```text
-ros2 run dcaron_bridge motion_sequence dcaron_bridge/examples/square.yaml
+```yaml
+timeout: 60.0
+segments:
+  - {command: 100, x: 0.5, speed: 0.15, profile: 18}
+  - {command: 99, yaw: 1.5707963267948966, angular_speed: 0.5, profile: 18}
 ```
 
-默认只检查，不发送运动。确认运动空间后加 `--execute`；日志用 `--log 文件.jsonl`。
-15° 测试例：
+缺省profile由此客户端填18；直接ROS Action不会替你填。
+不加 `--execute` 只离线检查；加它执行一次，加 `--sequential`逐段执行。
+完整路线在 [正方形](../dcaron_bridge/examples/square.yaml) 和 [操场](../dcaron_bridge/examples/stadium.yaml)。
+这不是Nav2路径跟踪器，也不保证段间恒速；车端负责闭环、加减速、曲率限制和末端微调。
 
-```text
-ros2 run dcaron_bridge motion_sequence dcaron_bridge/examples/rotation_probe.yaml --execute --log rotation.jsonl
-```
+## 结果与异常
 
-可将旋转、直线、平移转向和圆弧按顺序组合。此处是离散命令序列，不是 Nav2 路径跟踪器，
-段间等待完成回包；不承诺跨段连续速度。原有轨迹规划仍在 MCU 内执行。
+`process=0/notice=0x10`仅入队；`254/0x25`仍微调；`255/0`或`255/0x27`才成功。
+`255/0x26`超差失败，其他错误notice保留原值；本地主机取消/超时/失败使用notice=254，并在message说明原因。
+同一task ID重复完成不会重复计数。ACK丢失重发原ID原字节；完成丢失查原ID结果，不创建新动作。
 
-## 完成与异常
+队列开始时要求设备支持v6且队列为空。目标参数、串口连接或占用检查不通过会拒绝；两个Action不会并发执行。
+取消、超时或故障尝试取消并发零速；断线不能保证停车，重连不自动重放。
+关闭发送目标的终端不等于取消车端已接受目标。
 
-- Feedback 原始 process 1..254 的百分比是 `(process-1)/254*100`。
-- `FF/00` 为普通运动成功；版本/参数拒绝、RC 接管和新命令打断返回 aborted 与原 notice。
-- `notice=254` 保留为本地主机失败/取消/超时；message 说明原因，不伪装为 MCU 回包。
-- `timeout=0` 使用配置的 motion_timeout（默认 30s）；可设置正值但不能超过
-  max_motion_timeout（默认120s）。位移/转角/线速度/角速度均做上限检查，圆弧还检查
-  弧长和由 speed/radius 推导出的角速度。
-- Action 等待使用非阻塞 Future；遥测、取消和定时器继续工作。持续速度的 0.5s
-  watchdog 不会误停正在执行的有终点动作，后者有自己的截止时间。
-- 取消/超时/关闭尝试发零。新目标不会隐式抢占旧目标，需等待结果或先取消。
-- DFLink 没有序列号。取消或断线后，相同命令号的迟到回包会隔离到旧终止帧到达；
-  未收齐旧终止帧时拒绝新同类型目标。隔离状态跨串口重连保留；如果终止帧确实丢失，
-  先确认车辆停止再重启节点恢复，不能靠超时猜测归属并错误报告成功。
-- MCU 终止说明其完成判定成立，不等于外部测量已证明全部精度达标。
+## 专用接口和诊断工具
 
-## 十字标 NEXT 组合
+十字标通过 `/motion` 的128 CROSS_RECORD和129 CROSS_LOCALIZE调用，不支持Trajectory。
+mode=0 FIRST、1 NEXT；CROSS_LOCALIZE/NEXT须绑定next_command=100或101，并填写位移字段。
+该专用路径使用无ID编码和profile=0/1/2；需光电与底盘固件支持，不能夹入活动队列。
+成功捕获回包才设置pose_valid，位姿是连续odom系，不是地图定位真值。
 
-`CROSS_LOCALIZE, mode=1` 必须同时指定 `next_command=100`（LINEAR）或101
-（LINEAR_WITH_YAW），并填写绑定直线的字段。桥接把“武装＋直线”两个帧放在同一次
-串口写入，保证没有其他控制帧插入。整个 Action 等待 `B=0x81` 的最终回包，
-不会把普通直线回包误认为组合任务完成。
+`motion_sequence`是逐个调用 `/motion` 的辅助客户端，输入为YAML列表而不是Trajectory的字典格式。
+[小角度示例](../dcaron_bridge/examples/rotation_probe.yaml)适用它；默认按queue校验，只有显式 `--protocol legacy` 才用无ID校验，并须匹配节点配置。
 
-只有 `LEN=19, process=255, notice=0` 且 mode 匹配，result.pose_valid 才为 true；
-返回连续 odom 系的捕获位姿。失败和打断不提供有效 pose。
-标记 ID、地图、相邻标记变换仍由上层维护。实际捕获需光电和现场标记，尚未在本次中测试。
-
-## 不经过 ROS 的诊断
-
-根目录运行（直接 COM，不能与桥接同时占用）：
-
-```text
-python ros2/tools/probe_rotation.py --port COM5 --degrees 15 --rate 0.2 --timeout 8 --log rotation-direct.jsonl
-```
-
-该脚本先确认 VelPos 遥测，再发送旋转，记录进度/完成/前后航向，退出时发零并关闭
-连续订阅。省略 degrees 时只读遥测；诊断工具限制在 ±30°、0.3rad/s 内。
-
-已激活 ROS 与安装环境时，可用 `tools/probe_ros_rotation.py` 执行同样的小角度
-Action 测试。它自带桥接节点和客户端，不能与另一个 COM5 桥接同时启动。
-已完成结果见 [运动与真车验证记录](motion-validation-2026-09-10.md)。
+`tools/probe_rotation.py`直接占用串口，`tools/probe_ros_rotation.py`自带桥接节点，两者当前都使用队列v6。
+不填 `--degrees` 只读遥测；需要运动时限制在±30°内，均须 `--log 文件.jsonl`。
+不能和另一个串口桥接/调试进程同时运行。它们是诊断入口，不构成实车精度认证。

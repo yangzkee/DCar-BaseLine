@@ -1,231 +1,281 @@
-> 2026-10-20：统一使用 0x80 Odom；Pro完整、Std增强字段填0，Mini/SE不开放。旧0x81 VelPos已删除；0x95 MapOdom和BDB定位命令不变。
+# DCar 客户端例程
 
-> **Beta 0.3（2026-10-19）**：新版 STM32/ROS 连续队列、五档加速度及两个示例（操场；正方形+原地旋转）见 [Beta入口](docs/Beta_通信与示例_2026-10-19.md)。下文未修订部分为旧接口参考，不能把旧0/1/2与新16..20混用。
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
 
-# DCar 官方客户端例程与学习导航
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
 
-通过串口控制 DCar / DcarON 小车，从第一个运动指令开始，学习接线、运动编排、里程计读取和通信调试。
+程序运行在外部 STM32、Arduino 或电脑上，通过串口控制 DCar / DcarON，接收任务结果、状态与里程计；本仓库不包含车端主控固件。
 
-本仓库提供运行在**外部开发板或电脑**上的客户端代码。目前包含 STM32F103 Keil 工程、电赛固定路线、Arduino 库与示例、STM32 移植包，以及在电脑上运行的 ROS 2 桥接包。
+现成测试统一为**四段操场持续循环**，不需要选择路线或修改运动开关。Odom 和 VelPos 独立订阅、解析、保存和统计；遥测 / 状态只报告，不决定运动是否启动，运动必须获得相应任务完成回包。
 
-**第一次来：先选平台，再按对应教程运行，最后修改动作。** 稳定版的各平台放在 `main` 的不同目录中，选平台不需要切换 Git 分支；开发中的新功能统一放在 `develop`。
+## 目录
 
-[选择平台](#platforms) · [下载例程](#download) · [学习路线](#learning) · [STM32 快速开始](#stm32) · [Arduino 快速开始](#arduino) · [修改与调试](#debugging) · [协议与单位](#protocol) · [参与维护](#contributing)
+- [1. Example、PatchOnly、Arduino、ROS 怎么选](#选择)
+- [2. 下载后有什么功能](#现成功能)
+- [3. 下载、接线与车端要求](#下载接线)
+- [4. STM32 怎么用](#stm32测试)
+- [5. 发送运动的函数](#运动函数)
+- [6. 接收回传的函数和数据](#回传函数)
+- [7. 最小调用顺序](#最小调用)
+- [8. Arduino / ROS 怎么用](#其他平台测试)
+- [9. 四段动作与验收标准](#验收标准)
+- [10. 日志与常见问题](#常见问题)
+- [11. 源码目录](#源码目录)
+- [12. 软件检查与验证范围](#验证范围)
 
-[产品与完整教程](https://differ-tech.pages.dev/portal/view/dcar-fast-motion-control) · [DFLink V3 对外协议手册](DFLink_V3协议手册_对外版.md) · [版本下载](https://github.com/yangzkee/DCar-BaseLine/releases) · [问题反馈](https://github.com/yangzkee/DCar-BaseLine/issues)
+<a id="选择"></a>
+## 1. Example、PatchOnly、Arduino、ROS 怎么选
 
-<a id="platforms"></a>
-> ROS 2 与电赛路线已纳入统一主线。代码合入不代表所有硬件场景都已完成实测，具体范围见各平台的验证记录。
+| 目录 | 适用情况 | 包含内容 | 使用入口 |
+|---|---|---|---|
+| [DFCom_Example](DFCom_Example/README.md) | STM32F103C8T6，直接编译运行 | Keil 工程、标准库、启动时钟、DMA 串口、通信核心、main 中的操场循环 | `USER/Template.uvprojx` |
+| [DFCom_PatchOnly](DFCom_PatchOnly/README.md) | 已有自己的 STM32 工程 | 与 Example 相同的公共代码和 main；没有完整工程依赖 | 按移植说明接入自己的工程，不能独立编译 |
+| [DFCom_Arduino](DFCom_Arduino/README.md) | Uno / Nano（ATmega328P） | 库版与免安装库的单文件版，API 和操场路线相同 | Arduino IDE 打开 `DcarON_Stadium.ino` 或 `DcarON_Stadium_AllInOne.ino` |
+| [ros2](ros2/README.md) | 电脑或 ROS 2 应用 | 串口桥、独立双流话题、IMU、单动作和队列轨迹 Action、持续操场测试 | `stadium_test.launch.py` |
 
-## 1. 选择你的平台
+Example 与 PatchOnly 的能力相同，差别在工程依赖是否齐全。STM32 和 ROS 使用队列 v6；Arduino 使用无任务 ID 的逐条接口，不能照抄 `DFQueue_*` 或加速度档位 16..20。四个目录任选适合的平台，不是依次安装的组件。
 
-| 你的目标 | 从这里开始 | 开发环境与使用前提 |
-|---|---|---|
-| 用 STM32 学习串口控制，修改 C 语言动作程序 | [STM32 完整工程教程](DFCom_Example/README.md) | STM32F103C8T6、Keil MDK5 / ARM Compiler 5；客户端通信口 460800 |
-| 用 Arduino IDE 学习，调用库函数控制小车 | [Arduino 库与示例教程](DFCom_Arduino/README.md) | Uno / Nano（ATmega328P）；现有例程要求底盘 USART3 的 115200 双向通信支持，见下方前提 |
-| 不安装库，直接查看一个完整 Arduino 程序 | [Arduino 单文件示例](DFCom_Arduino/SingleFile/DcarON_Square_AllInOne/DcarON_Square_AllInOne.ino) | 与 Arduino 库版相同的接线、开发板和底盘固件前提 |
-| 把通信功能接入自己已有的 STM32 工程 | [STM32 移植包说明](DFCom_PatchOnly/README.md) | 需要目标工程原有的启动代码、标准库和系统辅助文件；不是独立完整工程 |
-| 体验 ROS 2 与 Windows 教程 | [ROS 2 教程](ros2/README.md) | 已纳入主线；实际验证范围见该目录文档 |
-| 体验 2026 电赛 H/D 固定路线 | [本页固定路线说明](#nuedc) | STM32 当前默认路线依赖 Pro 全量 Odom 回传，先阅读说明 |
-| 使用 ROS 1 或独立 Python 入门例程 | 当前尚未提供对应独立教程 | 可以先阅读协议手册 |
+<a id="现成功能"></a>
+## 2. 下载后有什么功能
 
-> **底盘兼容性：** 选对客户端开发板之后，还要确认底盘固件支持对应通信口、波特率、运动指令和回传格式。当前仓库尚未列出完整的底盘固件版本兼容表，不能据此认为所有历史固件都能直接使用。
+| 平台 | 启动与运动 | 接收与日志 | 失败处理 |
+|---|---|---|---|
+| STM32 Example / PatchOnly | 双停车初始化；固定观察窗口；倒计时 3 秒；四条任务连续入队，整圈完成后立即下一圈 | USART1 循环 DMA 持续收帧，主循环解析；Odom / VelPos 请求 10Hz；USART2 非阻塞日志；每秒字节数与两类帧诊断 | v6 握手、ACK、DONE 和超时必须通过；任务失败取消 / 零速，停止发新圈，继续收帧 |
+| Arduino 库版 / 单文件版 | 双停车初始化；固定观察窗口；等待 3 秒；四段逐条发、逐条等完成；完成后立即下一圈 | 硬件串口持续轮询；独立 Odom / VelPos 数据、时间戳与计数；不使用 SoftwareSerial 日志 | 任一等待失败发零速，停止后续段；保留收帧服务 |
+| ROS 持续测试入口 | 一条 launch 命令启动桥接及操场客户端；每圈成功后再提交下一圈 | 同时请求两种遥测，分别发布数据和统计；`/odom` 自动优先新鲜 Odom，否则用新鲜 VelPos；`/imu/data` 仅来自真实 Odom | 参数、串口、队列结果和任务时限约束；测试失败结束 launch；重连不重放旧目标 |
 
-<a id="download"></a>
-## 2. 下载例程
+遥测或状态没有回传时，运动仍可按任务协议运行；**运动成功与遥测验收是两项独立结论**。先完成车辆激活 / 校准，程序的状态查询不会替你校准。
+循环无额外圈间延时、无需按键或复位；车端仍可能逐段减速或微调，不能将“持续循环”理解为全程恒速、零停顿。
 
-- **只想运行已有发布版：** 打开 [Releases](https://github.com/yangzkee/DCar-BaseLine/releases)，选择对应平台的附件。`v1.0.0` 提供 `DCar-STM32F103C8-Keil.zip` 和 `DCar-STM32F103C8-Arduino.zip`；附件具体支持的开发板以包内说明为准。
-- **想学习或修改当前源码：** 点击仓库绿色 **Code → Download ZIP**，解压后进入所选平台目录。
-- **使用 Git 持续维护：** 克隆仓库后进入所选目录，各平台独立使用，不必安装其他平台的开发环境。
+<a id="下载接线"></a>
+## 3. 下载、接线与车端要求
+
+下载 **main** 当前源码，或在 main 页面选 Code → Download ZIP：
 
 ```sh
 git clone --branch main https://github.com/yangzkee/DCar-BaseLine.git
 cd DCar-BaseLine
 ```
 
-`main` 是稳定发布分支，`develop` 是开发集成分支；Release / 标签用于保存正式发布时的版本。发布附件不一定包含分支后续的修复，反馈问题时请注明分支、标签或提交号。
-
-<a id="learning"></a>
-## 3. 从入门到修改的学习路线
-
-| 步骤 | 学习内容 | 你应当确认的结果 |
+| 接口 | 接线 | 串口参数 |
 |---|---|---|
-| ① 接通通信 | 按平台教程接线，区分底盘通信口与电脑调试口 | 调试终端有启动输出，状态查询或里程计有回传 |
-| ② 看懂原例程 | 找到 `main()` / `setup()` / `loop()`，区分初始化、订阅和运动指令 | 能指出程序在哪里发指令、在哪里等待、在哪里读数据 |
-| ③ 修改一个动作 | 先改距离或角度中的一项，理解厘米/度与 SI 单位 | 能解释修改值、预期方向与实际动作之间的关系 |
-| ④ 编排动作序列 | 组合直线、转向、圆弧，检查等待结果 | 能区分完成、超时和继续发送下一条指令 |
-| ⑤ 读取反馈 | 查看位置、速度、航向与帧计数 | 能判断数据是否持续更新，并理解数据的单位和坐标系 |
-| ⑥ 移植与深入调试 | 阅读发送、接收解析和协议手册，运行离线测试 | 能沿“发送 → 底盘处理 → 回传 → 客户端解析”定位问题 |
+| STM32 USART1，车端口 | PA9 TX → 车 RX；PA10 RX ← 车 TX；GND 共地 | 460800，8N1，3.3V TTL |
+| STM32 USART2，日志口 | PA2 TX → USB-TTL RX；GND 共地 | 115200，8N1 |
+| Arduino 硬件 Serial | D1 TX 经 5V→3.3V 转换 → 车 USART3 RX/PB11；D0 RX ← 车 TX/PB10；GND 共地，确认电平兼容 | 115200，8N1 |
+| 电脑 ROS | USB-TTL TX/RX 与车 DFLink 口交叉，GND 共地；直接连车，不经过示例 STM32 | 460800，8N1，3.3V TTL |
 
-现有例程会发送运动指令。首次运行前预留运动空间；只想观察通信时，先注释业务运动段，保留初始化、订阅与接收处理。
+操场末段需要边平移边旋转，要求全向 / 麦克纳姆底盘。STM32 / ROS 需要队列 v6 及带 ID 的完成回包；Arduino 需要无 ID 运动与完成回包。车端标准 VelPos 为 v2（35 字节），全量 Odom 为 v4（51 字节），后者需要相应车端能力 / 授权。两种订阅彼此独立，不交替订阅、不由一种数据复制出另一种。
+本仓库不提供可保证兼容的车端烧录包；队列能力由握手确认，遥测能力由实际回传格式确认。
 
-<a id="stm32"></a>
-## 4. STM32 快速开始
+<a id="stm32测试"></a>
+## 4. STM32 怎么用
 
-### 接线与环境
+1. 使用 Keil MDK5 / ARM Compiler 5 打开 [Template.uvprojx](DFCom_Example/USER/Template.uvprojx)，启用 **Use MicroLIB**，编译。
+2. Debug / Utilities 选择自己的 ST-Link，使用 SWD，确认目标为 STM32F103C8，Flash 起始 `0x08000000`、64KB，RAM 起始 `0x20000000`、20KB。BOOT0=0，建议 BOOT1=0。下载器需根据实物配置，不预选某个人的序列号。
+3. 将程序烧录到外部板，按表接车端和 115200 日志终端。车辆放到适合操场运动的场地；复位后会自动运动。
+4. 观察 `[LAP] START 1`、每圈四条 DONE、`[LAP] DONE 1`、`START 2` 持续出现，并按[验收表](#验收标准)检查。
 
-| STM32F103C8T6 引脚 | 连接目标 | 参数 |
+固定启动顺序：发零速 → 1000ms → 再发零速 → Odom 订阅 → 20ms → VelPos 订阅 / 状态查询 → 500ms 观察 → 50ms → 业务回包会话 → 3000ms → 队列握手与运动。
+这些等待期间持续调用 `DFCom_Poll()`；没有遥测不会无限等待，也不阻止握手。每次 `DFQueue_Wait` 上限 60000ms，从该次调用开始计时。
+
+主函数中四条真实运动调用见 [main.c](DFCom_Example/USER/main.c)，没有路线选择或运动模式开关。订阅、查询、日志各自独立，默认均开启；用户不需要修改它们才能运行。
+PatchOnly 完成[移植步骤](DFCom_PatchOnly/README.md)后行为相同。
+
+<a id="运动函数"></a>
+## 5. 发送运动的函数
+
+STM32 声明见 [DFCom.h](DFCom_Example/HARDWARE/DFCom.h)，组帧与任务管理见 [DFCom_Tx.c](DFCom_Example/HARDWARE/DFCom_Tx.c)。在主循环调用，不能从中断发起阻塞等待。
+
+| 函数 | 参数、作用 | 返回值 / 判定 |
 |---|---|---|
-| PA9 / USART1_TX | 底盘所选 DFLink 通信口 RX | 460800，8N1 |
-| PA10 / USART1_RX | 底盘所选 DFLink 通信口 TX | 460800，8N1 |
-| PA2 / USART2_TX | USB-TTL RX，用于电脑查看打印 | 115200，8N1 |
-| PA3 / USART2_RX | USB-TTL TX，预留接收 | 115200，8N1 |
-| GND | 底盘及 USB-TTL GND | 共地 |
+| `DFQueue_Begin()` | 查询队列 v6 能力、空闲状态与下一任务 ID | 1 成功、0 失败，不自动改用另一协议 |
+| `DFQueue_Linear(x,y,speed,yaw,grade)` | 相对段起点平移 x/y 米；speed 为正 m/s；同时转 yaw 弧度；负 x 后退 | 非零 ID 表示确认入队，0 失败 |
+| `DFQueue_Rotate(yaw,omega)` | 原地相对转角，正 yaw 左转，omega 为正 rad/s | 非零 ID 仅表示入队 |
+| `DFQueue_Arc(radius,yaw,signed_speed,grade)` | 正半径米、相对转角弧度；有符号速度 m/s，负值倒行 | 非零 ID 仅表示入队 |
+| `DFQueue_Wait(id,timeout_ms)` | 等任务终态，内部持续 Poll | 1 DONE；2 超时 / 未知 ID / 零时限；3 设备故障。timeout 必须 >0；成功释放槽 |
+| `DFQueue_Status(id,&process,&notice)` | 非阻塞读取该 ID 最近回包，不释放槽 | 1 有回包，0 没有；返回 1 不表示成功完成 |
+| `DFQueue_LastError()` / `DFQueue_LastNotice()` | 最近操作的原因 / 通知码 | 失败日志一起记录 |
+| `DFQueue_Cancel()` | 尝试取消并发送零速，清理本地会话 | 无返回值；下一批重新 Begin，断线时不能确认停车 |
 
-TX/RX 交叉连接，使用匹配的 3.3V TTL 电平；底盘独立按产品要求供电，不用 USB-TTL 给电机供电。表中的 PA9/PA10 是**外部 STM32 开发板**引脚，底盘侧接口以对应产品接线说明为准。
+队列固定 SI：米、弧度、m/s、rad/s，`g_dfcom_unit_mode` 不影响队列。+X 前、+Y 左、正 yaw 逆时针。`0.50f`=50cm，π/2=90°。grade 16 极低、17 低、18 中、19 高、20 极高；仅直线 / 圆弧帧包含档位，原地旋转无此字段。
+STM32 最多跟踪 8 条在途任务；当前操场每圈 4 条。连续提交再 Wait 是排队，发一条立即 Wait 是逐段执行。
 
-1. 安装 Keil MDK5、ARM Compiler 5 和 STM32F1 Device Family Pack。
-2. 打开 [Template.uvprojx](DFCom_Example/USER/Template.uvprojx)。
-3. 检查目标器件 `STM32F103C8`、宏 `STM32F10X_MD, USE_STDPERIPH_DRIVER`、启动文件 `startup_stm32f10x_md.s`，并勾选 **Use MicroLIB**。
-4. 编译并下载到外部 STM32F103 开发板，打开电脑调试串口（115200，8N1）。
-5. 查看 `[INIT]` 诊断输出，确认状态回包及 `Telemetry flowing`；运行时查看里程计打印。
+Arduino 对应 `DFCom.moveLinear`、`moveLinearWithYaw`、`moveRot`、`moveArc`、`waitDone`、`stop`。默认厘米、cm/s、度、度/s，库 / 单文件均可 `useMeters()` 切 SI；profile 为 0 匀速、1 梯形、2 距离闭环，操场用 1。`waitDone(ms)` 为 true 才自然完成，false 为发送失败 / 超时 / 中断；0 无限等，超时本身不停车，例程负责 stop。`moveArc` 支持负速度倒行，半径必须正、速度非零。
+STM32 的无 ID `Cmd_Move_*` 及 `WaitMoveDone` 用于独立场景，不能夹入活动队列。持续速度接口无自动终点、无完成回包，必须主动零速停止。
 
-工具安装参考：[ARM Compiler / 芯片包获取说明](https://ucnerk2uhr85.feishu.cn/wiki/BaUMwzR4liGc6FkMES1c64c6nOb?renamingWikiNode=true#share-APaqdPwYPo1PIhxCeiac3fzJnih)。
+<a id="回传函数"></a>
+## 6. 接收回传的函数和数据
 
-### 从哪里开始改
+**任务结果**回答“动作完成了吗”，**遥测**回答“当前测得的位置 / 速度 / 姿态是什么”，**状态**回答车端当前报告的校准等状态。三者不能相互替代。
 
-当前 [USER/main.c](DFCom_Example/USER/main.c) 已接入电赛固定路线：启动握手完成后等待 3 秒，自动运行所选路线一次。参数入口是 [nuedc_2026_routes.h](DFCom_Example/USER/nuedc_2026_routes.h)，详见下方说明。原往返与转向示例可在历史提交 `bd591db` 中查看。
+| 平台 | 收帧服务 | 真实数据与诊断 |
+|---|---|---|
+| STM32 | `DFCom_Poll()` → `USART1_ReceivePoll()` → `DFCom_RxParse()`；有效任务帧分发 `DFQueue_Receive()` | `g_odom`、`g_velpos`、`g_dcar_state`、`g_dfcom_rx_diag`；USART 字节 / 溢出 / 错误计数 |
+| Arduino 两版 | `DFCom.update()`；`serviceDelay()` / `waitDone()` 内部同样服务 | `DFCom.odom`、`.velpos`、`.state`；`.odomDiag`、`.velposDiag`、`.rxBytes` |
+| ROS | 单线程执行器定期读串口和解析 | `/telemetry/odom`、`/telemetry/velpos` 各自发布真实来源；`/telemetry/status` JSON 统计；`/odom` 自动选择新鲜来源 |
 
-修改路线时保留初始化和启动运动会话处理，优先调整路线参数头文件；学习单条动作可参考 STM32 教程中的 API 示例。需要完整 API、订阅与反馈字段说明时，继续阅读 [STM32 详细教程](DFCom_Example/README.md)。
+应用不要手动调用 `DFQueue_Receive` 制造完成事件。移植时将接收字节接到解析器即可；完整 STM32 工程已接好。
 
-<a id="nuedc"></a>
-## 2026 电赛 H/D 题固定赛道
+### 数据与新鲜度
 
-当前 STM32 默认主程序需要底盘支持 Pro 全量 Odom（0x80）回传。只有 VelPos 回传时，路线会因 `ODOM_STALE` 停止；这不代表串口或基础运动能力失效。Pro 是软件/授权档位。
+STM32 `n_pos_x_m/n_pos_y_m` 是开机累计世界系位置；`b_vel_x_mps/b_vel_y_mps` 是随车头旋转的车体系速度，`yaw_rad` 为弧度。日志位置米、速度 m/s、Yaw 转为度。Arduino 的 `posX/posY`、`bVelX/bVelY`、`yaw` 同样始终存 SI，不随发送单位切换。
+Odom 额外含 roll/pitch、加速度和陀螺仪；VelPos 没有这些数据，不能造出真实 IMU。
 
-STM32 主工程现提供两套独立的胶囊形固定路线，均从 A 点顺时针运行一圈：
+所有平台都保存两类流各自的计数和时间。1 秒内新数据为新鲜：Odom 不可用时，VelPos 仍正常工作；Odom 恢复自动使用。两种都没有回传时报告缺失，不显示伪造数据，运动仍按自身协议处理。
+STM32 定时器只计时，Poll 约每 100ms 在主循环打印；Odom 不新鲜时不再打印旧值，VelPos 不新鲜时打印 `NO FRESH DATA`。日志开关不影响收帧 / 计时 / 运动。
 
-- H 题：1.5 m 直线、0.50 m 半圆、1.5 m 直线、0.50 m 半圆；默认 0.34 m/s。
-- D 题：1.5 m 直线、0.741 m 半圆、1.5 m 直线、0.741 m 半圆；默认 0.25 m/s。
+### 任务回包判定
 
-路线使用连续速度指令，按局部里程投影结束直线、按累计航向结束半圆；四段之间
-不停车，只在完成一圈或发生里程失联/超时时停车。实现不读取光电、灰度或其他
-循线传感器。
+| process / notice | 含义 | 结果 |
+|---|---|---|
+| 0 / 0x10 | 入队 ACK | 未完成 |
+| 1..254 / 0 | 进度缩放值 | 未完成，不能直接当作百分数 |
+| 254 / 0x25 | 到位后微调中 | 未完成 |
+| 255 / 0 | 自然完成 | 成功 |
+| 255 / 0x27 | 微调时限到达、车端判在容差内 | 成功，保留 notice |
+| 255 / 0x26 | 微调超差 | 失败 |
 
-唯一调参入口：
+详细报文、队列满及其他通知见 [DFLink v6](docs/DFLink-v6.md)。Arduino 的无 ID 接口使用自己的两字节进度回包和 bool 完成语义，不能套用 v6 notice 判定。
 
-```text
-DFCom_Example/USER/nuedc_2026_routes.h
-```
+<a id="最小调用"></a>
+## 7. 最小调用顺序
 
-修改下面一个宏即可选择烧录后执行 H 或 D，默认 H：
+STM32 初始化串口、毫秒 tick 和运动会话后，在主循环执行：
 
 ```c
-#define NUEDC_2026_ACTIVE_ROUTE NUEDC_2026_ROUTE_H
+u16 id;
+if (DFQueue_Begin()) {
+    id = DFQueue_Linear(0.10f, 0, 0.06f, 0, DF_ACCEL_MEDIUM);
+    if (!id || DFQueue_Wait(id, 10000) != DF_QUEUE_WAIT_DONE) {
+        printf("%s notice=0x%02X\r\n", DFQueue_LastError(), DFQueue_LastNotice());
+        DFQueue_Cancel();
+    }
+} else {
+    printf("begin failed: %s\r\n", DFQueue_LastError());
+}
 ```
 
-主程序完成通信握手后等待 3 秒，自动执行所选路线一次并停车；需要重跑时按开发
-板复位键。D 题半径按已确认的 741 mm 印刷地图设置；若使用官方 750 mm 场地，
-将 `NUEDC_2026_D_RADIUS_M` 改为 `0.750f`。
+完整初始化按 main；业务空闲和自定义延时也必须调用 Poll，默认至少每 5ms 服务一次。队列等待内部已服务。不要从 ISR 解析同一串字节，也不要在 ISR 调用 printf。
 
-路线主机仿真测试：
+<a id="其他平台测试"></a>
+## 8. Arduino / ROS 怎么用
+
+### Arduino
+
+库版安装 `DFCom_Arduino/DFCom` 到 Arduino libraries，打开 [DcarON_Stadium.ino](DFCom_Arduino/DFCom/examples/DcarON_Stadium/DcarON_Stadium.ino)；单文件直接打开 [DcarON_Stadium_AllInOne.ino](DFCom_Arduino/SingleFile/DcarON_Stadium_AllInOne/DcarON_Stadium_AllInOne.ino)，不需要装库。二选一，API 与实际路线相同。
+选择 Uno / Nano，上传时断开 D0/D1 与车端连接；上传后接回。完成固定启动等待即自动跑操场，每次循环四段，失败后 `testStopped=true`，成功圈数保存在 `completedLaps`。不需要打开运动模式。
+Uno 的唯一硬件串口用于车端，不向它打印文字，不用会屏蔽接收中断的 SoftwareSerial。遥测与诊断保存在公开对象中，可在业务中读取；需要串口日志时使用有独立硬件串口的板卡并保持非阻塞输出。详见 [Arduino 说明](DFCom_Arduino/README.md)。
+
+### ROS 2
+
+按 [ROS 说明](ros2/README.md)构建并加载环境，执行：
 
 ```sh
-sh tests/host/run_nuedc_2026_routes_tests.sh
-sh tests/host/run_nuedc_2026_integration_checks.sh
+ros2 launch dcaron_bridge stadium_test.launch.py port:=COM5
 ```
 
-<a id="arduino"></a>
-## 5. Arduino 快速开始
+COM5 换实际口，Linux 例如 `/dev/ttyUSB0`。此入口自动开启 Action 和持续操场客户端，无需另外启动桥接或切换模式。正常每圈显示四段结果，整圈 `success: true` 后立即再提交；Ctrl+C 结束。
+另一个已加载环境的终端可观察：
 
-**先确认底盘前提：** 当前 Arduino 教程按 Uno / Nano（ATmega328P）和底盘 USART3（115200）编写，并依赖底盘在该接口回传里程计与运动完成信息。仅导入 Arduino 库不会给底盘增加这项能力；如果不确定底盘固件是否支持，先核对固件说明或向维护者反馈版本信息。
+```sh
+ros2 topic echo /telemetry/status
+ros2 topic hz /telemetry/odom
+ros2 topic hz /telemetry/velpos
+```
 
-1. 按 [Arduino 教程](DFCom_Arduino/README.md) 确认接线及 5V → 3.3V 电平转换。
-2. 将 [DFCom 库目录](DFCom_Arduino/DFCom) 放入 Arduino 库目录，或将该目录打包后用 IDE 的“添加 .ZIP 库”导入。
-3. 打开 [DcarON_Square.ino](DFCom_Arduino/DFCom/examples/DcarON_Square/DcarON_Square.ino)，选择 Uno / Nano 并编译上传；上传时断开占用 D0/D1 的底盘连接，完成后再接回。
-4. 可通过例程的 D3 调试输出连接 USB-TTL，以 9600 波特率查看状态。底盘通信仍为 115200。
-5. 在 `loop()` 中修改方块边长、转角与等待时间。初学时保持订阅 10Hz，避免大量调试打印干扰接收。
+`/odom` 自动优先 1 秒内新鲜 Odom，缺失则用新鲜 VelPos；独立话题不会用另一个流补数。`/imu/data` 只来自 Odom。只读应用可单独启动 `bridge.launch.py`，不自动发路线；自定义动作、YAML 和单次校验工具见平台说明。
+一个串口只由桥接节点占用，不能再开串口助手或直接串口脚本。
 
-不想安装库，可以使用 [单文件版](DFCom_Arduino/SingleFile/DcarON_Square_AllInOne/DcarON_Square_AllInOne.ino)。库版和单文件版是两种使用方式，选择一种即可。
+<a id="验收标准"></a>
+## 9. 四段动作与验收标准
 
-<a id="debugging"></a>
-## 6. 修改与调试导航
-
-ROS 2 用户从 [Windows 逐步安装教程](ros2/docs/windows-tutorial.md) 开始，再读 [桥接包说明](ros2/README.md)、[运动动作与轨迹](ros2/docs/motion.md) 和 [已有实车验证记录](ros2/docs/motion-validation-2026-09-10.md)。该记录目前仅覆盖部分动作，不能当作所有轨迹已验证。
-
-### 想改什么，就看哪里
-
-| 目标 | STM32 | Arduino |
+| 段 | 目标动作 | 要验收什么 |
 |---|---|---|
-| 改距离、速度、转角、动作顺序 | [main.c](DFCom_Example/USER/main.c) | [DcarON_Square.ino](DFCom_Arduino/DFCom/examples/DcarON_Square/DcarON_Square.ino) |
-| 查 API、指令码与数据结构 | [DFCom.h](DFCom_Example/HARDWARE/DFCom.h) | [DFCom.h](DFCom_Arduino/DFCom/src/DFCom.h) |
-| 看指令打包与发送 | [DFCom_Tx.c](DFCom_Example/HARDWARE/DFCom_Tx.c) | [DFCom.cpp](DFCom_Arduino/DFCom/src/DFCom.cpp) |
-| 看回传解析与运动等待 | [DFCom_Rx.c](DFCom_Example/HARDWARE/DFCom_Rx.c) | [DFCom.cpp](DFCom_Arduino/DFCom/src/DFCom.cpp) |
-| 改串口配置 | [usart.c](DFCom_Example/SYSTEM/usart/usart.c) | 示例 `setup()` 中的 `DFCom.begin(115200)`，需与底盘匹配 |
-| 改调试输出 | [DFCom_Print.c](DFCom_Example/HARDWARE/DFCom_Print.c) | 示例中的 `dbg` 打印 |
+| 1 | 半径 0.30m、相对 +π，速度 -0.15m/s 倒行半圆 | 倒行、半圆形状、半径、正向 180° 航向变化、任务完成 |
+| 2 | 相对后退 0.60m，速度 0.15m/s，无附加转角 | 后退方向、距离、横向偏移、航向保持、任务完成 |
+| 3 | 同第 1 段 | 第二半圆的形状、半径、转向、与第 1 段的一致性 |
+| 4 | 固定直线路径后退 0.60m，同时车身正向转 2π | 后退与旋转同时进行、完整 360°、任务完成 |
+| 整圈 | 四段按顺序自动重复 | 每圈四段成功、圈数持续增长、不需人工触发、多圈位置 / 姿态漂移 |
 
-### 先看现象，再定位
+STM32 / ROS 用队列档位 18，Arduino 用无 ID profile 1。请求速度是上限，车端按曲率、加速度和旋转能力限速。
+Yaw 在 ±π 回绕，不能只看第 4 段起终点 yaw 相同就判“转满一圈”；必须观察连续姿态和实际旋转。世界系累计位置不能直接当每段相对位移；外部板复位不会清零车端里程计。
 
-| 现象 | 先检查 |
+| 验收层次 | 正常标准 |
 |---|---|
-| 电脑没有任何输出 | 是否连接了调试口而非底盘通信口；波特率是否正确；STM32 的 MicroLIB 配置 |
-| 有启动打印，没有状态或里程计 | 底盘供电、共地、TX/RX、底盘接口及波特率、固件回传支持；Arduino 尤其检查 USART3 前提 |
-| 有回包但小车不动 | 底盘激活状态、校准状态和运行模式；收到某个状态包本身不等于具备全部运动条件 |
-| 距离或转角差很多 | 默认是厘米/度，还是已经切换 SI；不要把 `0.5` 米误传为 `0.5` 厘米 |
-| 方向不符合预期 | `+X` 前、`+Y` 左、`+Yaw` 逆时针；核对控制指令与反馈字段各自的坐标系 |
-| 等待超时或动作被下一条打断 | 查看完成回包、等待返回值和时间上限；不要把超时当成成功到位 |
-| Arduino 间歇丢数据 | 减少 SoftwareSerial 打印，降低订阅频率，检查接线与电平 |
+| 构建与启动 | 编译无错误、上传成功；日志 / 运行变量对应当前程序 |
+| 运动协议 | STM32 每个 ID 的 Wait=DONE；ROS 最终 success=true；Arduino 每次 waitDone=true；入队 ACK / goal accepted 不算完成 |
+| 双遥测 | 两类各自 wire 和 ok 持续增长，格式正确，reject 不增长；不能将先后两次单流记录合并算双流 |
+| 接收稳定性 | STM32 dropped / overflows / errors 保持 0；双流连续观察至少 60 秒，并多次复位检查 |
+| 可选流缺失 | Odom 缺失时 VelPos 可单独更新；恢复后两类计数均增长，无手动切换；缺失流不能判验收通过 |
+| 独立性 | 无状态 / 无遥测时不因观察窗口卡住；运动仍由握手 / ACK / DONE 与超时判定；关闭日志仍收帧 |
+| 物理运动 | 四段方向和顺序正确；外部测量距离、半径、转角与多圈重复误差满足事先约定的车辆 / 任务指标 |
 
-### 运动等待的含义
+仓库没有统一“±几毫米 / ±几度”的实车精度承诺。测试前约定距离 / 角度 / 停止速度容差及重复次数，再用尺量、角度测量或外部定位验收。记录代码提交、车端能力、底盘、地面、电量、每段 task / notice 和外部测量。DONE 或里程计显示目标值不能单独证明物理精度。
 
-STM32 接收器的半帧拼接与单批处理上限存在已复现的完成帧遗漏问题，详见 [接收链路排查记录](docs/diagnostics/stm32-completion-frame.md)。等待超时不等于底盘没有执行完成。
+<a id="常见问题"></a>
+## 10. 日志与常见问题
 
-- STM32：`WaitMoveDone(CMD_LINEAR, 10000)` 等待对应直线任务；Arduino：`DFCom.waitDone(10000)` 等待当前任务。两者都是“收到完成信息就返回，否则最多等待 10 秒”。
-- **等待超时不会自动发停车指令，也不证明动作完成。** 应检查返回值，再决定重试、停车或发送下一条运动指令；下一条指令可以打断上一条。
-- `timeout == 0` 表示永久等待，链路失联时可能一直等待。
-- 持续速度指令没有同样的到位回传，不能依赖上述等待来停车；需要主动发送零速度（STM32：`Cmd_Move_Vel(0, 0, 0)`；Arduino：`DFCom.stop()`）。
+| 输出 / 现象 | 含义与检查 |
+|---|---|
+| `[INIT] ... (report only)` | 状态和遥测计数仅报告；校准位不是客户端运动开关，需事先完成车辆校准 |
+| `[LAP] START/DONE n` | 当前圈号；只有四段全部成功才计入完成 |
+| `[DEMO] FAILED stage=begin/submit/wait` | 握手 / 提交 / 等待失败，看 reason 和 notice；程序尝试取消 / 零速后不继续发新任务 |
+| `[UART1] bytes=... dropped=... overflows=... errors=...` | 车端接收计数，后三项应为 0；检查线缆、供电、频率和 Poll 调度 |
+| `[RX] odom/velpos wire/ok/reject/len/ver` | wire 为校验通过外层帧，ok 为负载解析成功；wire 增但 ok 不增时看长度 / 版本；wire=0 表示未收到该类型有效帧 |
+| `[VELPOS] NO FRESH DATA` | 缺首帧或本地超过 1 秒未更新；不能算遥测通过，不会因此自动切断运动 |
+| 只有一种遥测 | 检查另一类 wire / reject 与车端能力；两种数据分别保存，不相互冒充 |
+| Keil device mismatch | 核对 C8 目标、自己的 ST-Link 和实物芯片标识；SW-DP ID 不是完整芯片型号，不能仅凭它改选其他型号 |
+| 没有 STM32 日志 | PA2→USB-TTL RX、GND、115200、MicroLIB；检查日志开关与发送丢字节计数 |
+| Arduino 没有文本日志 | Uno 唯一硬件串口用于车端；查看公开对象 / 计数，不向车端串口打印文字 |
+| 距离 / 角度不对 | 队列固定米 / 弧度，Arduino 默认厘米 / 度；不要混用单位或 profile |
+| 更新 ROS 后行为没变 | 重新构建两个包，另开终端加载相同 install 环境 |
 
-客户端内部使用 A/B 运动槽隔离旧任务回包。由于协议回传不含 task id，某些旧终止帧丢失场景仍存在歧义，实现会丢弃模糊的完成帧，让当前等待走到超时，避免错误提前进入下一动作。细节见源码与离线测试。
+取消、停车均经过同一链路发送，失联时不能保证车端收到。遥测新鲜度提示不是硬件看门狗，车辆运动能力及停车保障由实际系统决定。
 
-<a id="protocol"></a>
-## 7. 协议、坐标系与单位
+<a id="源码目录"></a>
+## 11. 源码目录
 
-**DFCom** 是客户端通信代码及 API 的名称，源码中保留 `DFCom v2` 的称呼；**DFLink V3** 是仓库所附对外协议手册的协议族名称。它们与底盘固件发布版本不是同一个版本号，也不表示客户端已实现手册中的所有功能。
-
-| 量 | 默认 CM 模式的运动入参 | SI 模式的运动入参 |
-|---|---|---|
-| 距离 | 厘米（cm） | 米（m） |
-| 线速度 | 厘米/秒（cm/s） | 米/秒（m/s） |
-| 角度 | 度（deg） | 弧度（rad） |
-| 角速度 | 度/秒（deg/s） | 弧度/秒（rad/s） |
-
-STM32 用 `g_dfcom_unit_mode = DFCOM_UNIT_M` 切到 SI；Arduino 用 `DFCom.useMeters()`。修改单位模式时，要同步调整运动参数数值。
-
-解码后的原始里程计字段使用 SI 单位，不随发送单位模式改变；Arduino 的 `xCm()`、`yCm()`、`yawDeg()` 等便捷接口会转换为厘米或度。在线协议的整数缩放规则以 [DFLink V3 协议手册](DFLink_V3协议手册_对外版.md) 为准。
-
-坐标轴采用 `+X` 前、`+Y` 左、`+Yaw` 逆时针为正。反馈中包含车体系和世界系字段，编写闭环算法前应先确认字段所属坐标系。
-
-<a id="contributing"></a>
-## 8. 参与维护与反馈
-
-仓库保持两个长期分支：
-
-| 分支 | 用途 | 适合谁 |
-|---|---|---|
-| `main` | 稳定发布；开发内容验证后再合入 | 首次学习、按发布教程运行 |
-| `develop` | 汇总新平台、新场景和待验证改动 | 参与开发、体验新功能 |
-
-平台与场景用目录或配置区分，不各自长期占用一个分支。日常开发统一进入 `develop`，验证后通过 Pull Request 合入 `main`，正式发布再打标签。确有并行协作需要时可短期开任务分支，合入后及时清理。
-
-维护例程时，请同步更新对应教程中的接线、开发环境、单位和底盘固件要求；新增平台应提供独立运行说明，并在首页标明实际支持状态。修改完整工程、移植包或 Arduino 库时，检查相关副本和单文件示例是否需要同步。
-
-仓库已有离线回归测试。在安装 C/C++ 编译器及 `sh` 的主机上，从仓库根目录运行：
-
-```sh
-sh tests/host/run_move_slots_tests.sh
-sh tests/arduino/run_arduino_tests.sh
-sh tests/host/run_nuedc_2026_routes_tests.sh
-sh tests/host/run_nuedc_2026_integration_checks.sh
+```text
+DFCom_Example/
+  USER/main.c                   固定启动、独立订阅、四段操场循环
+  USER/Template.uvprojx          Keil完整工程
+  HARDWARE/DFCom.h               API、单位、数据结构与诊断字段
+  HARDWARE/DFCom_Tx.c            组帧、队列提交/等待/取消
+  HARDWARE/DFCom_Rx.c            有界流式解析、任务/状态/双遥测分发
+  HARDWARE/DFCom_Print.c         TIM2计时与主循环Poll服务
+  SYSTEM/usart/                 1024字节循环DMA接收、非阻塞日志
+DFCom_PatchOnly/                同一份公共代码的移植包
+DFCom_Arduino/
+  DFCom/src/                    Arduino通信库
+  DFCom/examples/DcarON_Stadium/ 库版操场例程
+  SingleFile/                   内嵌同一库实现的独立例程
+ros2/
+  dcaron_bridge/                 串口桥、双流接收与诊断、动作/循环客户端
+  dcaron_interfaces/             Motion、Trajectory与MotionSegment
+  docs/                         Windows环境与动作说明
+docs/DFLink-v6.md               报文和状态含义
+tests/                         离线主机检查
 ```
 
-ROS 2 的协议与运动逻辑可在未安装 ROS 的 Python 3.12 环境测试（与仓库 CI 一致；不要使用系统自带的 Python 3.9）：
+<a id="验证范围"></a>
+## 12. 软件检查与验证范围
+
+Python >=3.10、PyYAML 及主机 C/C++ 编译器，在仓库根目录执行：
 
 ```sh
-cd ros2/dcaron_bridge
-python3 -m unittest discover -s test -p test_protocol.py -v
-python3 -m unittest discover -s test -p test_motion.py -v
+python3 tests/run_checks.py
 ```
 
-测试覆盖 STM32 完整工程与移植包、Arduino 库与单文件版的运动等待等逻辑；它们不能代替 Keil / AVR 目标编译和真实底盘通信验证。
+统一覆盖文档与工程引用、两份 STM32 公共代码一致性、真实串口驱动模拟、双流粘连 / 分片 / DMA 环回 / 溢出重同步、队列与逐条运动、连续操场及失败处理。Windows C 主机检查可用：
 
-反馈问题请使用 [GitHub Issues](https://github.com/yangzkee/DCar-BaseLine/issues)，附上：例程目录与提交号或发布标签、开发板型号、底盘固件版本、接线与波特率、复现步骤、预期行为和实际日志。请用 UTF-8 保存代码与文档。
+```powershell
+powershell -File tests/host/run_windows_tests.ps1 -Compiler C:\path\to\gcc.exe
+```
+
+ROS 环境另执行 `colcon test --merge-install --packages-select dcaron_bridge` 和 `colcon test-result --verbose`。CI 包含主机回归、ROS Jazzy 实际构建 / 内存串口集成以及 Uno 两种完整例程编译；具体结果看对应提交的 Actions。
+主机模拟、目标编译和真实硬件测试分别验收。STM32 实测记录不能替代 ROS / Arduino 实车验证，也不能替代物理轨迹精度测量。
+
+
+## 2026-10-20 统一 Odometry
+
+STM32 和 ROS 默认统一订阅 `A=0x04/B=0x80`，回传 `A=0x6C/B=0x80`（v4、51B）。已删除其 VelPos 0x81 订阅和解析入口；下文历史双流描述以本节为准。保留新鲜度、DMA接收、队列任务ID及连续操场功能。Pro返回完整数据，Std的roll/pitch、三轴加速度、三轴角速度填0；Mini/SE不开放里程计。ROS只有明确设置 `publish_imu: true` 才发布 IMU，默认false以免把Std填零当作测量。BDB的A02/B81定位命令不受影响。

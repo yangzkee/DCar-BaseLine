@@ -13,12 +13,15 @@ from nav_msgs.msg import Odometry
 import yaml
 
 from .motion import MotionSpec, motion_frames
+from .queue import encode
 
 
 def main(args=None):
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument('file', type=Path)
     cli.add_argument('--execute', action='store_true', help='Without this flag: validate only, no ROS connection')
+    cli.add_argument('--protocol', choices=('queue', 'legacy'), default='queue',
+                     help='Must match the bridge motion_protocol; default: queue v6')
     cli.add_argument('--action', default='/motion')
     cli.add_argument('--odom', default='/odom')
     cli.add_argument('--log', type=Path)
@@ -36,8 +39,13 @@ def main(args=None):
                 if row[key] not in ('ROTATE', 'LINEAR', 'LINEAR_WITH_YAW', 'ARC', 'CROSS_RECORD', 'CROSS_LOCALIZE'):
                     cli.error(f'Unknown command {row[key]}')
                 row[key] = getattr(Motion.Goal, row[key])
+        queued = options.protocol == 'queue' and row.get('command') in (0x63, 0x64, 0x65, 0x66)
+        row.setdefault('profile', 18 if queued else 1)
         spec = MotionSpec(**row)
-        motion_frames(spec)
+        if queued:
+            encode(spec, 1)
+        else:
+            motion_frames(spec)
         specs.append(spec)
     if not options.execute:
         print(f'Validated {len(specs)} steps. No motion sent; add --execute to run.')

@@ -8,3 +8,10 @@ __pycache__/
 .pytest_cache/
 .venv/
 .pixi/
+
+# Local editor, macOS and build artifacts
+.DS_Store
+._*
+Objects/
+Listings/
+OBJ/

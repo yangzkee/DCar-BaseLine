@@ -1,187 +1,123 @@
-> 2026-10-20：telemetry统一为odom。Std/Pro均支持；publish_imu默认false，仅Pro可开启；Mini/SE不开放。旧velpos选项已删除。
+# DCar ROS 2 客户端
 
-> **Beta 0.3（2026-10-19）**：新版 STM32/ROS 连续队列、五档加速度及两个示例（操场；正方形+原地旋转）见 [Beta入口](../docs/Beta_通信与示例_2026-10-19.md)。下文未修订部分为旧接口参考，不能把旧0/1/2与新16..20混用。
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
 
-# DcarON ROS 2 客户端
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
 
-**新手入口：[Windows 从安装到运行详细教程](docs/windows-tutorial.md)。**
-包含 GitHub 分支/目录说明、首次安装、每天启动、读取回传和分步运动测试。
-查接口和参数继续阅读本页，查动作字段见 [motion.md](docs/motion.md)。
+电脑串口直连车端DFLink口，默认队列v6。`dcaron_interfaces`定义动作/轨迹消息，`dcaron_bridge`提供串口桥、双流遥测与测试客户端；不包含车端固件，也不是Nav2导航器。
 
-一个 Python 节点将 DFLink 串口变成 ROS 2 标准话题。与本仓库 STM32F1、Arduino
-例程并列维护；ROS 2 运行在电脑上，电脑通过 USB-TTL 直接连接 **Dcar 底盘通信口**，
-不需要串接 STM32F1 示例板，也不要连接示例板的 115200 日志口。
+## 目录
 
-```text
-你的 ROS 2 程序 / RViz / rosbag
-          ↕ 标准话题
-     dcaron_bridge（电脑）
-          ↕ DFLink / COM 或 /dev/ttyUSB*
-        Dcar 底盘
-```
+- [构建](#构建)
+- [一条命令持续操场测试](#一条命令持续操场测试)
+- [双遥测与话题](#双遥测与话题)
+- [自定义动作与只读应用](#自定义动作与只读应用)
+- [配置与异常行为](#配置与异常行为)
+- [验收与检查](#验收与检查)
 
-## 能力与范围
+## 构建
 
-| ROS 接口（默认无 namespace） | 类型 | 行为 |
-|---|---|---|
-| `/odom` | `nav_msgs/msg/Odometry` | 收到有效的新回包时发布；位置在 odom 系，速度在机体系 |
-| `/imu/data` | `sensor_msgs/msg/Imu` | 仅 `telemetry=odom` 时发布加速度和角速度 |
-| `/cmd_vel` | `geometry_msgs/msg/Twist` | 仅 `enable_cmd_vel=true` 时订阅，映射为 `A=0x02 B=0x62` |
-| `/motion` | `dcaron_interfaces/action/Motion` | 旋转、位移、平移并转向、圆弧、十字标，带进度/结果/取消 |
-| `/tf` | TF | 可选 `odom → base_link`，默认关闭 |
+ROS 2、Python>=3.10、colcon、pyserial、PyYAML；Windows完整环境步骤见 [Windows教程](docs/windows-tutorial.md)。从仓库ros2目录执行：
 
-- 默认 `telemetry=velpos`：标准 VelPos v2，35 字节；不虚构 IMU 数据。
-- `telemetry=odom`：Odom v4，51 字节，需要底盘当前档位/授权支持 Pro 全量回传。
-- SI：m、m/s、rad、rad/s。+X 前、+Y 左、+Z 上，Yaw 逆时针为正。
-- 原始串口订阅每次连接只发送一次；断线/数据超时会重连，丢弃旧命令。
-- 0.2 版补齐有终点运动与十字标；详见 [动作接口与轨迹示例](docs/motion.md)。
-
-## Windows 原生安装与运行
-
-无需 WSL、Ubuntu 或 Docker。采用 **ROS 官方 Windows 预编译包**，使用发行版配套的
-Pixi 环境；不要把系统 Python 的 DLL/依赖与 ROS 环境混用。
-
-- Windows 11 可按 [ROS 2 Lyrical 原生安装指南](https://docs.ros.org/en/lyrical/Get-Started/Installation/Windows-Install-Binary.html) 安装。
-- 官方文档的 [GitHub 源文](https://github.com/ros2/ros2_documentation/blob/lyrical/source/Get-Started/Installation/Windows-Install-Binary.rst) 可作为备用入口。
-- 下载 [官方 ROS 2 release](https://github.com/ros2/ros2/releases) 的 Windows amd64 包；固定发行版和 release，不使用 Rolling 作为交付环境。
-- 使用短路径，例如 `C:\dev\ros2_lyrical`；实际路径以解压结果为准。
-- 在含 `pixi.toml` 的发行包目录运行 `pixi install`，按该发行包说明执行
-  `pixi run python preinstall_setup_windows.py`，仅当该文件存在且该版指南要求时执行。
-- 在 CMD 中运行 `pixi shell`，再 `call <ROS安装目录>\local_setup.bat`。
-  下列所有命令均在这个已激活的终端中执行。
-
-在 **ROS 配套 Pixi 环境**中添加串口和测试依赖，并保留生成的环境锁文件：
-
-```bat
-pixi add "pyserial==3.5" pytest
-python -c "import rclpy, serial; from nav_msgs.msg import Odometry; print('OK')"
-```
-
-首次在两个激活后的终端分别运行官方 `demo_nodes_cpp talker` 和
-`demo_nodes_py listener`，确认 ROS 基础安装正常。
-0.2 版新增 `dcaron_interfaces` Action 定义，需要安装 **Visual Studio 2022 C++ Build Tools**
-或已有 VS 2022 的 C++ 工作负载。使用 x64 Native Tools 终端并激活 Pixi/ROS 后编译，
-`colcon` 会先生成接口，再构建 Python 驱动。运行时不要求启动 Visual Studio IDE。
-然后进入本仓库 `ros2` 目录：
-
-```bat
-set PYTHONUTF8=1
-set PYTHONIOENCODING=utf-8
-chcp 65001
+```sh
 colcon build --merge-install --base-paths . --packages-up-to dcaron_bridge
-call install\local_setup.bat
-python -m serial.tools.list_ports
+# Linux/bash:
+source install/setup.bash
+# Windows CMD改用: call install\local_setup.bat
+```
+
+车端须已激活/校准、支持队列v6和相应运动能力。USB-TTL 3.3V TTL，460800 / 8N1，TX/RX交叉、GND共地，不经过STM32示例板。关闭占用同一串口的助手和脚本。
+
+## 一条命令持续操场测试
+
+```sh
+ros2 launch dcaron_bridge stadium_test.launch.py port:=COM5
+```
+
+替换实际串口，Linux例如 `/dev/ttyUSB0`。这一个入口自动启动桥接、Action和持续测试客户端，无需选择模式或第二条执行命令。
+四段：半径0.30m倒行半圆→后退0.60m→同样倒行半圆→后退0.60m同时旋转2π，速度请求0.15m/s、档位18。需要全向/麦克纳姆底盘。
+每圈四段以队列执行，YAML整圈时限60秒；整圈最终success=true后立即下一圈，无圈间延时。客户端打印 `[LAP] DONE n` 及每圈反馈/结果，圈数持续增加。
+失败结束测试并关闭本launch；Ctrl+C退出时尝试取消和停车。断线不能确认停车。
+
+## 双遥测与话题
+
+每次串口连接独立发Odom订阅、VelPos订阅和状态查询，相邻请求间至少20ms；每种遥测请求10Hz，不根据是否收到某一种来轮换订阅。
+两类数据分别解析和保存；状态与遥测缺失只报告，不拒绝运动、不单独触发重连。任务必须按自身ACK / DONE / 超时完成。
+
+| 默认无namespace接口 | 类型 | 来源 / 用途 |
+|---|---|---|
+| `/telemetry/odom` | nav_msgs/Odometry | 仅真实Odom v4回包，不用VelPos补数 |
+| `/telemetry/velpos` | nav_msgs/Odometry | 仅真实VelPos v2回包，不用Odom补数 |
+| `/telemetry/status` | std_msgs/String，JSON | 每秒输出bytes、selected、state及两类wire/ok/reject/len/ver/fresh/age_s |
+| `/odom` | nav_msgs/Odometry | 优先最近1秒内Odom，缺失则用新鲜VelPos；两者都过期不发布旧值 |
+| `/imu/data` | sensor_msgs/Imu | 仅选中的真实新鲜Odom提供；VelPos无IMU，不发布伪造IMU |
+| `/motion` | dcaron_interfaces/action/Motion | 单动作结果 / 反馈 |
+| `/trajectory` | dcaron_interfaces/action/Trajectory | 1..128段队列轨迹 |
+| `/cmd_vel` | geometry_msgs/Twist | 可选持续速度输入 |
+| `/tf` | TF | 可选odom→base_link，默认关闭 |
+
+VelPos35字节/version=2，Odom51字节/version=4，Odom需相应车端能力/授权。未收到Odom时VelPos仍工作，Odom恢复自动使用。诊断两类ok计数必须分别增长才能判双流通过。
+VelPos没有角速度，Odometry角速度零仅为缺失数据占位且协方差设为未知大值，不能据此判断车辆不旋转。IMU orientation_covariance[0]=-1，不把混合姿态当测量姿态。
+frame名称只标识坐标系，不自动旋转数据；当前按FLU（前/左/上）解释。
+
+## 自定义动作与只读应用
+
+只读应用可单独启动桥接（不会自动运动）：
+
+```sh
 ros2 launch dcaron_bridge bridge.launch.py port:=COM5
 ```
 
-将 COM5 换成实际串口号。默认只读取遥测，不接收运动话题。新开终端同样激活 ROS
-和本工作区后验证：
+自定义动作可给此通用桥接入口加 `enable_motion_actions:=true`，从另一加载环境的终端发送：
 
-```bat
-ros2 topic list
-ros2 topic echo /odom --once
-ros2 topic hz /odom
+```sh
+ros2 action send_goal /motion dcaron_interfaces/action/Motion "{command: 100, x: 0.1, speed: 0.06, profile: 18, timeout: 10.0}" --feedback
 ```
 
-可选 PowerShell 入口（从已激活 CMD 启动，继承环境）：
+profile必须显式16..20，包括原地旋转；目标缺省0无效。`goal accepted`不是车端完成，入队ACK也不是；最终success=true才表示协议成功。
+通用YAML工具可离线校验或执行一次：
 
-```bat
-powershell -NoProfile -File tools\windows.ps1 -Action check
-powershell -NoProfile -File tools\windows.ps1 -Action build
-powershell -NoProfile -File tools\windows.ps1 -Action test
-powershell -NoProfile -File tools\windows.ps1 -Action run -Port COM5
+```sh
+ros2 run dcaron_bridge trajectory_sequence dcaron_bridge/examples/stadium.yaml
+ros2 run dcaron_bridge trajectory_sequence dcaron_bridge/examples/stadium.yaml --execute
 ```
 
-脚本不改系统执行策略；若电脑限制脚本，可直接使用上面的 CMD 命令。
+不带execute只校验，加sequential逐段执行。持续测试直接使用上面的stadium_test.launch.py，不需要给工具额外选循环模式。
+安装后的YAML位于 `share/dcaron_bridge/examples`；用 `ros2 pkg prefix --share dcaron_bridge` 定位。详细字段见[动作说明](docs/motion.md)，报文见[队列协议](../docs/DFLink-v6.md)。
 
-## Linux / 已有 ROS 2 环境
+## 配置与异常行为
 
-源码相同。Jazzy 示例（云端 CI 的 Linux 容器不要求你的电脑安装 Linux）：
+`dcaron_bridge/config/bridge.yaml`配置频率、地址、运动范围、时限等；launch接受port、enable_cmd_vel、enable_motion_actions、namespace、params_file，前三项直接覆盖配置文件。双流默认始终订阅，不设置telemetry选择器。
+默认：任务30s、最大120s、位移2m、转角2π、线速度0.5m/s、角速度1rad/s；telemetry_timeout=2s仅用于缺失告警，重连间隔3s仅用于实际串口故障。
+一个节点独占串口，两个Action互斥，不自动抢占；先取消或等结果。`motion_protocol=queue`默认v6，legacy仅影响单动作编码，不是自动降级；Trajectory始终v6。
 
-```bash
-source /opt/ros/jazzy/setup.bash
-sudo apt install python3-serial python3-colcon-common-extensions python3-pytest
-cd DCar-BaseLine/ros2
-colcon build --merge-install --base-paths . --packages-up-to dcaron_bridge
-source install/setup.bash
-ros2 launch dcaron_bridge bridge.launch.py port:=/dev/ttyUSB0
+cmd_vel默认关闭，启用后0.5秒无新速度输入尝试零速；非法/超限速度同样终止当前动作并零速。cmd_vel有效输入会打断Action。
+遥测/状态不作为运动门禁；参数、串口连接、队列能力、ACK / DONE、取消及任务时限仍有效。串口故障中止当前任务，重连不重放旧动作；缺失遥测只报告，不关闭仍可用的运动通道。
+
+## 验收与检查
+
+另一个加载环境的终端执行：
+
+```sh
+ros2 topic echo /telemetry/status
+ros2 topic hz /telemetry/odom
+ros2 topic hz /telemetry/velpos
 ```
 
-串口使用 460800、8N1，USB-TTL TX/RX 与底盘 RX/TX 交叉并共地，采用匹配的
-3.3V TTL 电平。关闭占用同一串口的 DFhelper 等程序，一个串口只由一个节点打开。
+两类wire和ok同时持续增加至少60秒，reject不增加；只有单流时另一流不得被补数。Odom断更1秒后 `/odom` 自动选择新鲜VelPos，Odom恢复后自动选择它；两种都断更时不发布旧值。
+确认每圈结果success=true、completed=4、圈号持续增长，再按[物理验收表](../README.md#验收标准)测量四段动作和重复性。
 
-## 速度输入与 Pro 数据
+根目录执行 `python3 tests/run_checks.py`；真正ROS环境另执行：
 
-确认场地可运动后显式开启速度订阅：
-
-```text
-ros2 launch dcaron_bridge bridge.launch.py port:=COM5 enable_cmd_vel:=true
+```sh
+colcon test --merge-install --packages-select dcaron_bridge --event-handlers console_direct+
+colcon test-result --verbose
 ```
 
-另一个激活后的终端发送零速度验证连接：
+CI运行ROS Jazzy构建与内存串口集成，不代替实车验证。Windows环境、车辆与其他发行版按对应环境验收。
+Livox独立驱动接入见[说明](docs/livox.md)，本包不依赖雷达SDK。
 
-```text
-ros2 topic pub --rate 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0}, angular: {z: 0.0}}"
-```
 
-默认 XY 合速度上限 0.5m/s、角速度上限 1rad/s；超范围、NaN、Inf 或非平面轴
-命令会被拒绝并发零。默认 0.5 秒无新指令主动发零。检查使用单调时钟定时器，
-不受 ROS 仿真时间暂停影响。遥测失效时禁止接受新的运动输入。
+## 2026-10-20 统一 Odometry
 
-**底盘持续速度命令没有自动停车终点。** 节点正常退出/输入超时会尝试发零；
-拔掉串口、强杀进程或电脑断电时，主机无法保证零速度抵达底盘。这不是 MCU
-通信看门狗，不能替代设备急停。本包没有修改底盘固件的该行为。
-
-Pro 全量数据：
-
-```text
-ros2 launch dcaron_bridge bridge.launch.py port:=COM5 telemetry:=odom
-ros2 topic echo /imu/data --once
-```
-
-## 配置与数据约定
-
-配置见 `dcaron_bridge/config/bridge.yaml`。复制到自用配置文件后可传入
-`params_file:=绝对路径`。**launch 的 port、telemetry、enable_cmd_vel、enable_motion_actions 始终覆盖 YAML
-同名值**（包括默认值）；这四个值从命令行指定，其余值从 YAML 读取。
-参数启动时读取且只读，修改后重启。
-
-- 消息使用收到有效帧时的主机 ROS 时间；MCU `Time_ms/us` 保留在协议解码结果中。
-  首版未建立设备与电脑的时间同步，不把设备开机计数直接当 ROS 时间戳。
-- IMU 已按固件 FLU 机体系解释，默认 `imu_frame=base_link`。改名不会自动旋转数据，
-  其他安装坐标系需要正确的外参转换。
-- 不将 Odom yaw 和传感器 roll/pitch 组合成 IMU 姿态测量：IMU
-  `orientation_covariance[0]=-1` 表示不可用，角速度/加速度协方差全零表示未知。
-- VelPos 无角速度，`/odom` 角速度为占位零、协方差 1e6，不能当作静止测量；
-  需要角速度时使用 Pro Odom/独立 IMU。
-- Odom 协方差是保守初值，尚未实测标定；接入融合算法时按实际设备整定。
-- TF 默认关闭，仅在本节点拥有 `odom → base_link` 发布权时通过配置开启。
-  多车用 namespace 区分话题，并分别设置 frame 名。
-- `/cmd_vel` 为 **Twist**，不是 TwistStamped；上层输出后者时需转换或配置上层。
-- 数据发布为 reliable / volatile / depth 10；命令订阅为 reliable / volatile /
-  depth 1。订阅者使用兼容 QoS。
-
-## 验证与维护
-
-已完成首版检查，具体环境和结果见 [2026-09-10 验证记录](docs/validation-2026-09-10.md)。
-
-无需 ROS 的协议测试（Windows/Linux 均可）：
-
-```text
-cd ros2/dcaron_bridge
-python -m unittest discover -s test -p test_protocol.py -v
-python -m unittest discover -s test -p test_motion.py -v
-```
-
-`.github/workflows/ros2.yml` 配置了 Windows/Ubuntu 协议测试，以及 ROS 2 Jazzy
-容器的 colcon 构建、安装入口、launch 参数和真实 ROS 话题＋模拟串口集成检查。
-覆盖报文、单位、粘包分包、噪声、版本、超时、地址过滤和重连等行为。
-
-**已完成 Windows 原生 ROS 2 Lyrical 构建、28 项测试及真车 15° 旋转验证。**
-详见 [运动接口与真车验证记录](docs/motion-validation-2026-09-10.md)。直线/圆弧等
-实际落地精度、十字标和其他 ROS 发行版仍需分别验证。
-
-协议修改先更新仓库主协议文档和报文测试，再更新 `protocol.py`；ROS 转换集中在
-`node.py`。不复制 MCU 固件进 ROS 包，不提交安装环境或 colcon 生成目录。
-
-与 Livox 搭配见 [Livox 接入说明](docs/livox.md)。两套驱动独立发布话题，本包不依赖雷达 SDK。
+STM32 和 ROS 默认统一订阅 `A=0x04/B=0x80`，回传 `A=0x6C/B=0x80`（v4、51B）。已删除其 VelPos 0x81 订阅和解析入口；下文历史双流描述以本节为准。保留新鲜度、DMA接收、队列任务ID及连续操场功能。Pro返回完整数据，Std的roll/pitch、三轴加速度、三轴角速度填0；Mini/SE不开放里程计。ROS只有明确设置 `publish_imu: true` 才发布 IMU，默认false以免把Std填零当作测量。BDB的A02/B81定位命令不受影响。

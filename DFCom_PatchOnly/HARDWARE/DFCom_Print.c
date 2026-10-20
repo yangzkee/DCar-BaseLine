@@ -1,22 +1,4 @@
-/******************************************************************************
- * DFCom_Print.c - 终端打印 + 本地 tick
- * ---------------------------------------------------------------------------
- * 提供两个东西：
- *   1. g_local_tick_ms：本地毫秒计数（TIM2 1ms 中断维护，给 WaitMoveDone 等用）
- *   2. Odom_Print()：把 g_odom 打到 USART2（printf 已重定向到 USART2）
- *      TIM2 计数到 100ms 时自动调用一次（10Hz 刷屏）
- *
- * TIM2 中断：72MHz / 7200 = 10kHz 计数器，1ms 一次中断
- *   - 每次中断 g_local_tick_ms++
- *   - 每 100 次中断（100ms） Odom_Print() 一次
- *
- * 学生在 USART2（USB-TTL 接 PC）终端看到的输出（坐标系 ROS REP-103）：
- *   X(fwd) = +X 前进方向 (m)        Y(left) = +Y 左方 (m)
- *   Yaw 协议层是弧度 (rad)，但终端打印转成度 (deg) 学生看着方便，CCW+ 逆时针为正
- *
- *   [ODOM] Yaw=  0.12 X(fwd)= 0.000 Y(left)= 0.000 Vx(fwd)= 0.00 Vy(left)= 0.00 fr=10
- *   [ODOM] Yaw=  0.15 X(fwd)= 0.024 Y(left)= 0.000 Vx(fwd)= 0.25 Vy(left)= 0.00 fr=11
- ******************************************************************************/
+/* TIM2只维护1ms时基；DFCom_Poll在主循环调度日志，USART2非阻塞发送。 */
 #include "DFCom.h"
 #include "stm32f10x.h"
 #include "usart.h"
@@ -27,12 +9,13 @@ volatile u32 g_local_tick_ms = 0;
 
 /* ---- 控制是否自动打印（学生可以临时关掉） ---- */
 volatile u8 g_print_odom_enable = 1;
+volatile u8 g_print_full_odom_enable = 1;
 
 /* ===========================================================================
  * TIM2 初始化：1ms 中断
  *   APB1 = 36MHz, TIM2 计数频率 = 72MHz / Prescaler
- *   设 Prescaler = 7200 - 1, Period = 10 - 1 → 10kHz/10 = 1kHz = 1ms
- *   (或者 Prescaler=72-1, Period=1000-1，也是 1ms，原理一样)
+ *   实际Prescaler=72-1，Period=1000-1，1MHz/1000=1kHz
+ *   不在TIM2中断内打印。
  * ===========================================================================*/
 void Odom_PrintTimer_Init(void)
 {
@@ -61,43 +44,60 @@ void Odom_PrintTimer_Init(void)
     TIM_Cmd(TIM2, ENABLE);
 }
 
-/* ===========================================================================
- * TIM2 中断服务 —— 每 1ms 一次
- *   1. g_local_tick_ms++ (给 WaitMoveDone 等用)
- *   2. 每 100ms (= 10Hz) 调一次 Odom_Print
- * ===========================================================================*/
+/* 中断不调用printf，不访问USART2，不依赖任何遥测开关。 */
 void TIM2_IRQHandler(void)
 {
     if (TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET) {
         TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
-
         g_local_tick_ms++;
+    }
+}
 
-        /* 10Hz 打印 */
-        if (g_print_odom_enable && (g_local_tick_ms % 100) == 0) {
-            Odom_Print();   /* 简化版默认打印 */
-        }
+/* 仅从主循环调用；错过的日志不补打，避免积压影响运动任务。 */
+void DFCom_Poll(void)
+{
+    static u32 last_print, last_diag;
+    u32 now;
+    USART1_ReceivePoll(); /* 必须在日志开关检查之前，关闭日志仍持续收帧。 */
+    now = g_local_tick_ms;
+    if (!g_print_odom_enable) return;
+    if ((u32)(now - last_print) >= 100) {
+        last_print = now;
+        if (g_print_full_odom_enable && g_odom.frame_count &&
+            (u32)(now - g_odom.local_tick_ms) < 1000) Odom_Print();
+    }
+    if ((u32)(now - last_diag) >= 1000) {
+        last_diag = now;
+        printf("[UART1] bytes=%lu dropped=%lu overflows=%lu errors=%lu\r\n",
+               (unsigned long)g_usart1_rx_bytes, (unsigned long)g_usart1_rx_dropped,
+               (unsigned long)g_usart1_rx_overflows, (unsigned long)g_usart1_rx_errors);
+        printf("[RX] odom wire=%lu ok=%lu reject=%lu len=%u ver=%u; "
+               "\r\n",
+               (unsigned long)g_dfcom_rx_diag.odom_wire, (unsigned long)g_odom.frame_count,
+               (unsigned long)g_dfcom_rx_diag.odom_rejected,
+               (unsigned)g_dfcom_rx_diag.odom_len, (unsigned)g_dfcom_rx_diag.odom_version);
     }
 }
 
 
 
 
-/* ===========================================================================
- * 打印一行 ODOM 数据到 USART2（printf 已重定向到 USART2）
- *   只在收到过至少一帧数据时才打印（避免开机刷一堆 0）
- * ===========================================================================*/
+
 void Odom_Print(void)
 {
-    /* 取一份"瞬时快照"，避免中断期间被改写产生撕裂 */
+    /* 取一份"瞬时快照" */
     OdomData_t snap;
-    /* volatile 复制：逐字段读，因为 g_odom 是 volatile */
+    snap.roll_rad     = g_odom.roll_rad;
+    snap.pitch_rad    = g_odom.pitch_rad;
     snap.yaw_rad      = g_odom.yaw_rad;
-    snap.n_pos_x_m    = g_odom.n_pos_x_m;
+    snap.n_pos_x_m    = g_odom.n_pos_x_m;       /* N 系: 累积位置 */
     snap.n_pos_y_m    = g_odom.n_pos_y_m;
-    snap.b_vel_x_mps  = g_odom.b_vel_x_mps;
+    snap.b_vel_x_mps  = g_odom.b_vel_x_mps;     /* B 系: 瞬时速度 */
     snap.b_vel_y_mps  = g_odom.b_vel_y_mps;
-    snap.gyro_z_rps   = g_odom.gyro_z_rps;
+    snap.acc_x_mps2   = g_odom.acc_x_mps2;      /* B 系: IMU 加速度 */
+    snap.acc_y_mps2   = g_odom.acc_y_mps2;
+    snap.acc_z_mps2   = g_odom.acc_z_mps2;      /* 静止平放 ≈ +9.81 */
+    snap.gyro_z_rps   = g_odom.gyro_z_rps;      /* B 系 Z 角速度 */
     snap.frame_count  = g_odom.frame_count;
 
     if (snap.frame_count == 0) {
@@ -105,16 +105,26 @@ void Odom_Print(void)
         return;
     }
 
-    /* 格式（ROS REP-103, +X 前 / +Y 左 / Yaw CCW+, deg）：
-     *   [ODOM] Yaw=<度> X(fwd)=<m> Y(left)=<m> Vx(fwd)=<m/s> Vy(left)=<m/s> Gz=<rad/s> fr=<帧号>
-     * 注意: 协议层 yaw 是 rad, 这里转 deg 仅为终端打印好看 (学生不一定懂弧度);
-     *       内部闭环建议直接用 g_odom.yaw_rad 跟 dyaw_rad 对齐 (单位一致免转换). */
-    printf("[ODOM] Yaw=%7.2f X(fwd)=%7.3f Y(left)=%7.3f Vx(fwd)=%6.2f Vy(left)=%6.2f Gz=%6.2f fr=%lu\r\n",
+    /* 打印格式说明 (字段名标了坐标系 + 单位, 避免混淆):
+     *
+     *   Roll/Pitch (deg)   = 姿态欧拉角 (FLU, 平地车 R/P ≈ 0)
+     *   Yaw (deg, CCW+)    = 车头方向相对开机初始朝向偏转角度
+     *   X(N,fwd) Y(N,left) = N 系 (开机时拍快照, 不跟车转) 累积位置 (m)
+     *   Vx(B) Vy(B)        = B 系 (跟车转) 瞬时速度 (m/s)
+     *   Ax/Ay/Az (B,m/s²)  = B 系 IMU 加速度 (Az 含重力反作用 ≈ +9.81)
+     *   Gz (B,rad/s)       = B 系 Z 轴角速度 (CCW+) */
+    printf("[ODOM] R=%6.2f P=%6.2f Yaw=%7.2f X(N,fwd)=%7.3f Y(N,left)=%7.3f "
+           "Vx(B)=%5.2f Vy(B)=%5.2f Ax=%5.2f Ay=%5.2f Az=%5.2f Gz=%5.2f fr=%lu\r\n",
+           (double)DFCOM_RAD2DEG(snap.roll_rad),
+           (double)DFCOM_RAD2DEG(snap.pitch_rad),
            (double)DFCOM_RAD2DEG(snap.yaw_rad),
            (double)snap.n_pos_x_m,
            (double)snap.n_pos_y_m,
            (double)snap.b_vel_x_mps,
            (double)snap.b_vel_y_mps,
+           (double)snap.acc_x_mps2,
+           (double)snap.acc_y_mps2,
+           (double)snap.acc_z_mps2,
            (double)snap.gyro_z_rps,
            (unsigned long)snap.frame_count);
 }

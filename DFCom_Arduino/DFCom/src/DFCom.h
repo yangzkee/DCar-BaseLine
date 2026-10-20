@@ -1,7 +1,7 @@
 /******************************************************************************
  * DFCom.h  ——  Arduino (ATmega328P) 版 DcarON 小车通信库
  * ----------------------------------------------------------------------------
- * 把 STM32 版 DFCom_v2 协议移植到 Arduino Uno/Nano, 对象式 API, 学生友好。
+ * Arduino Uno/Nano无任务ID逐条运动接口；未实现STM32/ROS的队列v6。
  * 官网: https://differ-tech.pages.dev/
  *
  *  ╔══════════════════════════════════════════════════════════════════════╗
@@ -59,6 +59,7 @@ struct DFOdom {
     float posX, posY, posZ;          /* 世界系位置 m (开机累积) */
     uint32_t carTimeS, carTimeUs;
     uint32_t frameCount;
+    uint32_t localTickMs;
     uint8_t  fresh;
 };
 
@@ -70,6 +71,7 @@ struct DFVelPos {
     float posX, posY, posZ;
     uint32_t carTimeS, carTimeUs;
     uint32_t frameCount;
+    uint32_t localTickMs;
     uint8_t  fresh;
 };
 
@@ -85,11 +87,16 @@ struct DFState {
     int16_t ctrlPar2X100;
 };
 
+/* 独立统计真实有效外层帧与成功解码；遥测可用性不决定运动是否发送。 */
+struct DFStreamDiag {
+    uint32_t wire = 0, rejected = 0;
+    uint8_t len = 0, version = 0;
+};
+
 class DFCom_t {
 public:
     /* ---- 初始化（内部会先停车并隔离旧运动回传） ---- */
     void begin(long baud = 115200, HardwareSerial &port = Serial);
-    void setDebug(Stream &dbg) { _dbg = &dbg; }   /* 可选: 接 SoftwareSerial 看打印 */
 
     /* ---- 单位 (默认厘米+度) ---- */
     void useCentimeters() { _unit = DFCOM_UNIT_CM; }
@@ -127,6 +134,11 @@ public:
     DFOdom   odom;
     DFVelPos velpos;
     DFState  state;
+    DFStreamDiag odomDiag, velposDiag;
+    uint32_t rxBytes = 0;
+    bool odomAvailable() const { return odom.frameCount && (uint32_t)(millis()-odom.localTickMs)<1000; }
+    bool velposAvailable() const { return velpos.frameCount && (uint32_t)(millis()-velpos.localTickMs)<1000; }
+    void serviceDelay(uint32_t ms); /* 延时期间持续收帧；日志/状态不阻塞运动。 */
 
     /* ---- 友好取值 (换成 cm / 度) ---- */
     float xCm()    { return odom.posX * 100.0f; }
@@ -136,7 +148,6 @@ public:
 
 private:
     HardwareSerial *_ser = &Serial;
-    Stream *_dbg = nullptr;
     uint8_t _unit = DFCOM_UNIT_CM;
     uint8_t _lastCmd = DFCOM_CMD_LINEAR;
 
@@ -156,11 +167,9 @@ private:
     uint8_t _sendFailed = 0;
     uint8_t _failedCmd = 0;
 
-    /* 字节流解析状态机 */
+    /* 有界字节流缓存；保留残帧，扫描后续有效帧，支持双遥测粘连。 */
     uint8_t _buf[72];
     uint8_t _idx = 0;
-    uint8_t _st = 0;       /* 0=找头 1=收头部 2=收剩余 */
-    uint8_t _need = 0;     /* 整帧总长 */
 
     bool _frame(uint8_t A, uint8_t B, const uint8_t *payload, uint8_t len);  /* 建帧+校验+发送 */
     void _feed(uint8_t byteIn);                                              /* 字节流解析 */

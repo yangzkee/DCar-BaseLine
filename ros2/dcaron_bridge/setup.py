@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name="dcaron_bridge",
-    version="0.3.0",
+    version="0.4.1",
     packages=["dcaron_bridge"],
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/dcaron_bridge"]),
@@ -11,9 +11,8 @@ setup(
         ("share/dcaron_bridge/launch", glob("launch/*.launch.py")),
         ("share/dcaron_bridge/config", glob("config/*.yaml")),
         ("share/dcaron_bridge/examples", glob("examples/*.yaml")),
-        ("share/dcaron_bridge/examples/beta", glob("examples/beta/*.yaml")),
     ],
-    install_requires=["setuptools", "pyserial>=3.5,<4"],
+    install_requires=["setuptools", "pyserial>=3.5,<4", "PyYAML>=6,<7"],
     zip_safe=True,
     maintainer="yangzkee",
     maintainer_email="220290149+yangzkee@users.noreply.github.com",
@@ -22,5 +21,6 @@ setup(
     tests_require=["pytest"],
     entry_points={"console_scripts": ["dcaron_bridge = dcaron_bridge.node:main",
                                       "trajectory_sequence = dcaron_bridge.trajectory:main",
-                                      "motion_sequence = dcaron_bridge.sequence:main"]},
+                                      "motion_sequence = dcaron_bridge.sequence:main",
+                                      "stadium_test = dcaron_bridge.trajectory:stadium_main"]},
 )

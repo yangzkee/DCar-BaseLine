@@ -1,6 +1,7 @@
 # One segment is valid. Default false permits continuous queue lookahead.
 dcaron_interfaces/MotionSegment[] segments
 bool sequential
+# 0 uses configured motion_timeout; positive seconds bound the entire trajectory.
 float64 timeout
 ---
 bool success

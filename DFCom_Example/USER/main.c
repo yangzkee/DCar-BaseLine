@@ -1,348 +1,145 @@
-#include "beta_examples.h"
 /******************************************************************************
+ * DCar STM32F103C8T6 客户端：DFLink 队列 v6。
  *
- *   ╔══════════════════════════════════════════════════════════════════════╗
- *   ║                                                                      ║
- *   ║       DcarON DFCom 客户端例程 (精简版) - STM32F103C8T6 裸机          ║
- *   ║       协议版本: SI + ROS REP-103 (m / m/s / rad / +X 前 +Y 左)       ║
- *   ║                                                                      ║
- *   ║              官方网站：https://differ-tech.pages.dev/                ║
- *   ║                                                                      ║
- *   ╚══════════════════════════════════════════════════════════════════════╝
+ * 烧录后自动测试：上电等待及遥测观察后等待3秒，持续循环操场路线，无模式开关。
+ * 每圈：倒行半圆 -> 后退 -> 倒行半圆 -> 后退同时旋转360度。
+ * 需要全向/麦克纳姆底盘。正常完成立即开始下一圈，失败停止，不把失败当通过。
+ * 订阅统一Odom；遥测/状态诊断仅报告，不作为运动启动条件。
  *
+ * 所有 DFQueue_* 入参固定为米、弧度、m/s、rad/s。
+ * 0.10f 表示 10cm，PI/2 表示 90 度；不使用 g_dfcom_unit_mode。
+ * +X 向前、+Y 向左、正 yaw 逆时针。位移/转角相对每段动作起点。
  *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *  ▌ 一、硬件接线
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *
- *  STM32F103C8T6 板子 ←→ 接线对象
- *
- *  ┌──────────────────────────────────────┬─────────────────────────────────┐
- *  │ STM32 引脚                            │ 接到                            │
- *  ├──────────────────────────────────────┼─────────────────────────────────┤
- *  │ USART1_TX  (PA9)                     │ DcarON 小车 USART1_RX           │
- *  │ USART1_RX  (PA10)                    │ DcarON 小车 USART1_TX           │
- *  │ GND                                  │ DcarON GND（共地，必接）         │
- *  ├──────────────────────────────────────┼─────────────────────────────────┤
- *  │ USART2_TX  (PA2)                     │ USB-TTL 模块 RX                 │
- *  │ USART2_RX  (PA3)                     │ USB-TTL 模块 TX（可不接）       │
- *  │ GND                                  │ USB-TTL GND（共地，必接）       │
- *  └──────────────────────────────────────┴─────────────────────────────────┘
- *
- *  USB-TTL 模块（CH340/CP2102/FT232 都行）插电脑 USB，电脑识别成 COMx 口。
- *
- *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *  ▌ 二、串口参数
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *
- *   USART1 (接 DcarON): 460800 bps, 8N1, 无流控
- *   USART2 (接电脑   ): 115200 bps, 8N1, 无流控
- *
- *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *  ▌ 三、怎么看 printf 输出
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *
- *  1. 把 USB-TTL 模块插电脑
- *  2. 设备管理器里看分配到哪个 COM 口（比如 COM6）
- *  3. 打开串口工具（推荐 MobaXterm / Tera Term / SecureCRT / 串口助手）
- *  4. 选择 COMx，波特率 115200，8N1，无流控
- *  5. 点 "打开/连接"
- *  6. 给 STM32 上电，应该看到下面这样的输出：
- *
- *       ============================================
- *         DcarON DFCom Client - STM32F103C8T6
- *         https://differ-tech.pages.dev/
- *       ============================================
- *       [INIT] USART1 = 460800 (to DcarON)
- *       [INIT] USART2 = 115200 (this terminal)
- *       [INIT] Subscribe ODOM @ 10Hz...
- *       [INIT] Query DcarState...
- *       [INIT] DcarState: imu_calibrated=1, finetune=1, par1=1.00 par2=1.00
- *       [INIT] ODOM data flowing ✓ (frame_count=15 in 1500ms)
- *       [INIT] ✓ All OK, sending commands...
- *
- *       [ODOM] Yaw=  0.12 X(fwd)=  0.000 Y(left)=  0.000 ... fr=15
- *       [ODOM] Yaw=  0.13 X(fwd)=  0.024 Y(left)=  0.000 ... fr=16
- *       ...
- *
- *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *  ▌ 四、Keil 工程必须勾的选项
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *
- *   Project → Options → Target → Code Generation → ☑ Use MicroLIB
- *
- *  不勾的话 printf 不工作（fputc 重定向用到 MicroLIB），整个例程会卡在第一个
- *  printf 那里——看不到任何输出。
- *
- *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *  ▌ 五、★ 单位约定（默认 厘米 + 度, 可切换 SI）★
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *
- *   全局变量 g_dfcom_unit_mode 控制 Cmd_Move_* 入参的单位:
- *
- *      DFCOM_UNIT_CM (默认, 学生友好):
- *          位置   → 厘米 (cm)         例: 50 = 0.5 米
- *          速度   → 厘米/秒 (cm/s)    例: 30 ≈ 0.3 m/s
- *          角度   → 度 (deg)          例: 90 ≈ M_PI/2 rad
- *          角速度 → 度/秒 (deg/s)     例: 60 ≈ 1.05 rad/s
- *
- *      DFCOM_UNIT_M (SI 协议原生):
- *          位置   → 米 (m)            例: 0.5  = 50 cm
- *          速度   → 米/秒 (m/s)       例: 0.3  ≈ 30 cm/s
- *          角度   → 弧度 (rad)        例: 1.5708 ≈ 90°
- *          角速度 → 弧度/秒 (rad/s)
- *
- *   协议层永远是 SI，小车端不知道这个开关存在。
- *   接收侧 g_odom 字段也永远是 SI 原生 (不受开关影响)。
- *
- *   坐标系 (ROS REP-103, 永远不变):
- *      +X = 前方 (forward) ← 想"前进"就 px > 0 或 vx > 0
- *      +Y = 左方 (left)    ← 想"左移"就 py > 0 或 vy > 0
- *      +Yaw = CCW 逆时针    ← 想"左转"就 dyaw > 0 (右手定则绕 +Z)
- *
- *   速度范围参考（与车型有关）:
- *      CM 模式: 典型 10 ~ 50 cm/s; omega_max 30 ~ 120 deg/s
- *      M  模式: 典型 0.1 ~ 0.5 m/s; omega_max 0.5 ~ 2.0 rad/s
- *      物理上限取决于车型 (标准版 520 电机大约 80 ~ 100 cm/s)
- *
- *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *  ▌ 六、三个等级的玩法 (示例用默认 CM 模式)
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *
- *  🟢 入门 (最简单):
- *      Cmd_Move_Linear(0, 50, 30, 2); // +Y 左移 50 cm, 30 cm/s, profile=2(高精度)
- *      delay_ms(3000);                // 粗暴等 3 秒
- *
- *  🟡 进阶 (等小车真到位):
- *      Cmd_Move_Linear(50, 0, 30, 2); // 第 4 参 profile: 2=高精度距离闭环
- *      WaitMoveDone(CMD_LINEAR, 1000); // 最多执行 1s；提前到位就提前返回
- *                                      //   传 0 才表示永久等待
- *                                      //   ─── 第一参 cmd_code 必须跟刚发的函数对应:
- *                                      //       Cmd_Move_Linear         → CMD_LINEAR
- *                                      //       Cmd_Move_LinearWithYaw  → CMD_LINEAR_WITH_YAW
- *                                      //       Cmd_Move_Rot            → CMD_ROT
- *                                      //       Cmd_Move_Arc            → CMD_ARC
- *                                      //       Cmd_Move_Vel            → 不要用 WaitMoveDone
- *
- *  🔴 高手 (闭环, 读 g_odom 永远是 SI 米/弧度):
- *      while (g_odom.n_pos_x_m < 0.5f) {     // 0.5 m = 50 cm
- *          Cmd_Move_Vel(30, 0, 0);           // CM 模式: 30 cm/s
- *          delay_ms(50);
- *      }
- *      Cmd_Move_Vel(0, 0, 0);                // 主动停车
- *
- *
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *  ▌ 七、常见报错与排查
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *
- *  ❌ 终端啥都不输出
- *     → USB-TTL 接错 PA2/PA3？波特率不是 115200？Keil 没勾 Use MicroLIB？
- *
- *  ❌ 看到 INIT 输出但 [INIT] ✗ NO TELEMETRY data
- *     → PA9/PA10 接小车的线没接？小车没上电？小车 USART1 不是 460800？
- *
- *  ❌ 看到 [INIT] ✗ DcarState query timeout
- *     → 同上，PA9/PA10 接线有问题；或小车上电时间不够
- *
- *  ❌ 看到 imu_calibrated=0
- *     → 小车未激活或 IMU 未校准 → 用 DcarON 上位机软件先激活/校准
- *
- *  ❌ 小车收到指令但不动
- *     → 小车 OLED 是不是显示"未激活/未校准"？激活了才能动
- *     → DcarON 安全锁：未激活时即使收到指令电机也不转
- *
- *  ❌ 小车动的方向不对（前进变后退之类）
- *     → 新协议是 +X 前 / +Y 左！如果是从老例程改来的，记得交换 px/py
- *
+ * 接线：PA9(TX) -> 车 RX，PA10(RX) <- 车 TX，GND 共地，460800/8N1。
+ * 调试：PA2(TX) -> USB-TTL RX，GND 共地，115200/8N1。
+ * Keil：完整工程见 DFCom_Example/USER/Template.uvprojx，启用 Use MicroLIB。
+ * DFCom_PatchOnly中的本文件仅供移植参考，不包含独立Keil工程。
+ * 本程序运行在外部 STM32 板上，不是小车主控固件。
  ******************************************************************************/
-
 #include "sys.h"
 #include "usart.h"
 #include "delay.h"
 #include "DFCom.h"
-#include "nuedc_2026_routes.h"
-#include "system_stm32f10x.h"
 
-/* M_PI 在 Keil C90 默认未定义，自己声明 */
-#ifndef M_PI
-#define M_PI   3.14159265358979323846f
-#endif
+#define DEMO_SPEED_MPS       0.15f
+#define DEMO_GRADE           DF_ACCEL_MEDIUM
+#define DEMO_START_DELAY_MS  3000
+#define DEMO_WAIT_MS         60000
+/* 独立开关，关闭回传或日志不会关闭运动；不重复订阅，避免重置车端推流。 */
+#define DEMO_SUBSCRIBE_ODOM   1
+#define DEMO_QUERY_STATE      1
+#define DEMO_LOG_ENABLE       1
 
-/* ===========================================================================
- * 系统初始化
- * ===========================================================================*/
+#define DEMO_PI              3.14159265358979323846f
+
 static void System_Init(void)
 {
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
     delay_init();
-    uart_init(460800);          /* USART1 → DcarON */
-    usart2_init(115200);        /* USART2 → printf 终端 */
-    Odom_PrintTimer_Init();     /* TIM2: 维护本地 ms tick + 10Hz 自动打 ODOM */
-    /* ★ 单位模式默认 CM (厘米 + 度)
-     * 如需切换, 看 main() 里的 "★★ 单位切换 ★★" 那一段 */
+    uart_init(460800);
+    usart2_init(115200);
+    g_print_odom_enable = DEMO_LOG_ENABLE;
+    Odom_PrintTimer_Init();  /* TIM2只计时，打印在主循环服务中执行。 */
 }
 
-/* ===========================================================================
- * 启动诊断 —— 帮学生快速发现接线/激活/校准问题
- * ===========================================================================*/
-/* ★ 启动诊断函数 — 可注释掉
- * ──────────────────────────────────────────────────────────────────────
- * 这是给学生用的"自检流程", 帮你快速发现接线/激活/通信问题。
- * 跑完产生几行 [INIT] 日志, 让你确认链路 OK 再开始发指令。
- *
- * 如果你已经确认接线正常 / 小车已激活, 这一步是可选的:
- *   在 main() 里把 Startup_Diagnose() 这一行注释掉即可, 直接进 while(1) 发指令。
- *
- * 等待时间已尽可能压缩:
- *   - 订阅后等 200ms (1~2 帧 10Hz 推回来) 确认链路
- *   - DcarState 查询超时 200ms (实际通常 5~30ms 就回来)
- *   - 总耗时 ~500ms, 比之前 (~3 秒) 短得多
- */
+/* 延时仍完整执行；每5ms服务一次日志，不在中断中格式化/等待串口。 */
+static void Demo_Delay(u32 ms)
+{
+    while (ms) {
+        u32 step = ms > 5 ? 5 : ms;
+        delay_ms(step);
+        DFCom_Poll();
+        ms -= step;
+    }
+}
+
+/* 诊断是观察窗口，不根据状态或任一遥测的有无决定是否发运动任务。 */
 static void Startup_Diagnose(void)
 {
-    u32 t0;
-    u32 fc_odom_before,   fc_odom_after;
-    u32 diff_odom, diff_total;
-
-    printf("\r\n");
-    printf("============================================\r\n");
-    printf("  DcarON DFCom Client - STM32F103C8T6\r\n");
-    printf("  Protocol: SI + ROS REP-103 (+X fwd, +Y left)\r\n");
-    printf("  https://differ-tech.pages.dev/\r\n");
-    printf("============================================\r\n");
-    printf("[INIT] USART1 = 460800 (to DcarON)\r\n");
-    printf("[INIT] USART2 = 115200 (this terminal)\r\n");
-    printf("[CLK] SystemCoreClock=%lu\r\n", (unsigned long)SystemCoreClock);
-    printf("[CLK] RCC->CFGR=0x%08lX RCC->CR=0x%08lX\r\n",
-           (unsigned long)RCC->CFGR,
-           (unsigned long)RCC->CR);
-    printf("[CLK] SWS=0x%02lX HSERDY=%lu PLLRDY=%lu\r\n",
-           (unsigned long)((RCC->CFGR & RCC_CFGR_SWS) >> 2),
-           (unsigned long)(((RCC->CR & RCC_CR_HSERDY) != 0) ? 1 : 0),
-           (unsigned long)(((RCC->CR & RCC_CR_PLLRDY) != 0) ? 1 : 0));
-
-    /* 步骤 1：独立订阅 Odom（持续 10Hz） */
-    printf("[INIT] Subscribe ODOM @ 10Hz...\r\n");
-    Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
-    delay_ms(150);   /* 等 ~1.5 帧, 让链路稳定 */
-
-    /* 步骤 2：查询小车状态（IMU 校准 / 控制参数）*/
-    printf("[INIT] Query DcarState...\r\n");
+    printf("\r\n[DCar] STM32 client 0.4.1 / circular RX / independent telemetry / queue v6\r\n");
+    printf("[INIT] car=USART1 460800; terminal=USART2 115200\r\n");
+    printf("[INIT] queue units=m, rad, m/s, rad/s\r\n");
+    if (DEMO_SUBSCRIBE_ODOM)
+        Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
+    Demo_Delay(20);  /* 保留两条订阅之间的间隔。 */
     g_dcar_state.received = 0;
-    Cmd_Query_DcarState();
-
-    /* 等回传, 最多 200ms (实际通常 5~30ms 回来) */
-    t0 = g_local_tick_ms;
-    while (!g_dcar_state.received && (g_local_tick_ms - t0) < 200) {
-        delay_ms(5);
-    }
-
-    if (g_dcar_state.received) {
-        printf("[INIT] DcarState: imu_calibrated=%d, finetune=%d, par1=%.2f par2=%.2f\r\n",
-               (int)g_dcar_state.imu_calibrated,
-               (int)g_dcar_state.is_finetune,
-               (double)(g_dcar_state.ctrl_par1_x100 / 100.0f),
-               (double)(g_dcar_state.ctrl_par2_x100 / 100.0f));
-
-        if (g_dcar_state.imu_calibrated == 0) {
-            printf("[INIT] ✗ IMU NOT CALIBRATED!\r\n");
-            printf("[INIT]   小车 IMU 没校准 -- 用 DcarON 上位机软件先激活/校准！\r\n");
-            printf("[INIT]   未激活的小车会拒绝运动（安全锁），电机不会转。\r\n");
-        }
-    } else {
-        printf("[INIT] ✗ DcarState query timeout!\r\n");
-        printf("[INIT]   小车没回应 -- 检查:\r\n");
-        printf("[INIT]    1. PA9/PA10 与小车 USART1 接线（注意 TX/RX 交叉）\r\n");
-        printf("[INIT]    2. STM32 GND 与小车 GND 是否共地\r\n");
-        printf("[INIT]    3. 小车有没有上电、是不是 460800 bps\r\n");
-    }
-
-
-    printf("[INIT] Waiting 200ms to check telemetry flow...\r\n");
-    fc_odom_before   = g_odom.frame_count;
-    delay_ms(200);   /* 10Hz × 0.2s ≈ 2 帧, 足够确认链路 (原来 1500ms 太久了) */
-    fc_odom_after   = g_odom.frame_count;
-    diff_odom   = fc_odom_after   - fc_odom_before;
-    diff_total  = diff_odom;
-
-    if (diff_total > 0) {
-        printf("[INIT] Odom frames: %lu\r\n", (unsigned long)diff_odom);
-        printf("[INIT] ✓ All OK, sending commands...\r\n");
-    } else {
-        printf("[INIT] ✗ NO TELEMETRY data (Odom v4)!\r\n");
-        printf("[INIT]   小车没在推数据 -- 可能原因:\r\n");
-        printf("[INIT]    1. 接线问题 (同上)\r\n");
-        printf("[INIT]    2. 小车未激活 (上位机软件激活后再试)\r\n");
-        printf("[INIT]    3. 小车 USART1 不是 460800\r\n");
-    }
-
-    printf("\r\n");
+    if (DEMO_QUERY_STATE) Cmd_Query_DcarState();
+    Demo_Delay(500); /* 固定观察窗口，无遥测时也不会无限等待。 */
+    printf("[INIT] state_reply=%u imu_calibrated=%u odom=%lu (report only)\r\n",
+           (unsigned)g_dcar_state.received, (unsigned)g_dcar_state.imu_calibrated,
+           (unsigned long)g_odom.frame_count);
+    if (g_dcar_state.received && !g_dcar_state.imu_calibrated)
+        printf("[INIT] WARN: car reports uncalibrated; check car calibration\r\n");
+    printf("[INIT] telemetry/state do not gate motion; queue ACK/DONE still required\r\n");
 }
 
-
-/* ===========================================================================
- * 主程序
- * ===========================================================================*/
 int main(void)
 {
+    u16 ids[4];
+    u32 lap = 0;
+    u8 i;
+    const u8 count = 4;
+    u8 result;
+    const char *stage = "begin";
 
-    /* ─── 1. 初始化（串口、定时器）─────────────────── */
     System_Init();
-
-    /*
-     * 上电安全握手：
-     *   1) 立刻发一次零速度，先尽力停车；
-     *   2) DCar 由整车供电，等待其真正启动稳定后再发一次零速度；
-     *   3) 这段时间所有 A=0x6F 运动回传都隔离，不允许污染首个业务任务。
+    /* STM32 复位时车端可能仍在运行。先发零速，等车端供电启动后再发一次。
+     * 隔离此阶段的运动回包，避免带入正式任务；停车能否到达仍取决于链路。
      */
     DFCom_MoveSessionQuarantine();
     Cmd_Move_Vel(0, 0, 0);
-    delay_ms(1000);   /* DCar 从整车取电，启动到 ready 大约需要 500ms~1s */
+    Demo_Delay(1000);
     Cmd_Move_Vel(0, 0, 0);
-
-    /* ===========================================================
-     * ★★ 单位切换 (一行就能改, 想用什么单位取消注释那一行就行) ★★
-     * -----------------------------------------------------------
-     *   Cmd_Move_* 函数入参的单位由 g_dfcom_unit_mode 决定:
-     *
-     *     DFCOM_UNIT_CM (★ 默认, 不改就是这个)
-     *         cm / cm/s / deg / deg/s
-     *         例: Cmd_Move_Linear(50, 0, 30, 2)   → 前进 50 cm, 30 cm/s
-     *
-     *     DFCOM_UNIT_MM (毫米, 精确定位 / 机械臂场景)
-     *         mm / mm/s / deg / deg/s
-     *         例: Cmd_Move_Linear(500, 0, 300, 2) → 前进 500 mm, 300 mm/s
-     *
-     *     DFCOM_UNIT_M (协议原生 SI)
-     *         m / m/s / rad / rad/s
-     *         例: Cmd_Move_Linear(0.5f, 0, 0.3f, 2) → 前进 0.5 m, 0.3 m/s
-     *
-     *      不受这个开关影响 (要看 cm/mm 自己 *100 / *1000)。
-     * -----------------------------------------------------------*/
-    // g_dfcom_unit_mode = DFCOM_UNIT_MM;   /* 毫米 + 度 */
-    // g_dfcom_unit_mode = DFCOM_UNIT_M;    /* 米 + 弧度 (SI) */
-    /* (不写就是默认 DFCOM_UNIT_CM, 厘米 + 度) */
-
-    /* ─── 2. 启动诊断 —— 打印链路 / 激活状态 ──────── */
-    /* ★ 如果已经确认接线 + 激活都 OK, 可以把下面这行注释掉, 启动更快 */
     Startup_Diagnose();
-
-    /* 即使用户关闭 Startup_Diagnose，也给第二次停车的旧终止帧留出隔离窗口。 */
-    delay_ms(50);
-    /* 诊断期旧回传已经隔离；从两个全零槽开始接收正式运动任务。 */
+    Demo_Delay(50);
     DFCom_MoveSessionStart();
-    printf("[INIT] Motion session ready (A/B slots cleared)\r\n");
 
-    /* Beta: select one of the two examples in beta_examples.h. Run once only. */
-    if(DF_BETA_RUN){
-        delay_ms(3000);
-        printf("[BETA] completed=%u\r\n",(unsigned)DF_BetaExample());
+    printf("[DEMO] continuous stadium; start in %lu ms\r\n",
+           (unsigned long)DEMO_START_DELAY_MS);
+    Demo_Delay(DEMO_START_DELAY_MS);
+    while (1) {
+        DFCom_Poll();
+        stage = "begin";
+        if (!DFQueue_Begin()) goto failed;
+        lap++;
+        printf("[LAP] START %lu: 1=reverse arc; 2=reverse line; 3=reverse arc; 4=reverse line+yaw\r\n",
+               (unsigned long)lap);
+        stage = "submit";
+        /* 四条任务按顺序连续入队；运动调用直接放在main内，便于修改和验收。
+         * 半径30cm、每段后退60cm；末段平移同时旋转，仅适用于全向底盘。
+         */
+        ids[0] = DFQueue_Arc(0.30f, DEMO_PI, -DEMO_SPEED_MPS, DEMO_GRADE);
+        if (!ids[0]) goto failed;
+        ids[1] = DFQueue_Linear(-0.60f, 0, DEMO_SPEED_MPS, 0, DEMO_GRADE);
+        if (!ids[1]) goto failed;
+        ids[2] = DFQueue_Arc(0.30f, DEMO_PI, -DEMO_SPEED_MPS, DEMO_GRADE);
+        if (!ids[2]) goto failed;
+        ids[3] = DFQueue_Linear(-0.60f, 0, DEMO_SPEED_MPS, 2*DEMO_PI, DEMO_GRADE);
+        if (!ids[3]) goto failed;
+
+        stage = "wait";
+        for (i = 0; i < count; i++) {
+            printf("[QUEUE] lap=%lu segment=%u/4 task=%u waiting\r\n",
+                   (unsigned long)lap, (unsigned)(i+1), (unsigned)ids[i]);
+            /* 每次Wait的上限，不是整圈的总截止时间；0不表示无限等。 */
+            result = DFQueue_Wait(ids[i], DEMO_WAIT_MS);
+            if (result != DF_QUEUE_WAIT_DONE) goto failed;
+            printf("[QUEUE] lap=%lu segment=%u/4 task=%u DONE notice=0x%02X\r\n",
+                   (unsigned long)lap, (unsigned)(i+1), (unsigned)ids[i],
+                   (unsigned)DFQueue_LastNotice());
+        }
+        printf("[LAP] DONE %lu: 4 tasks completed; next lap immediately\r\n",
+               (unsigned long)lap);
+        /* 不延时、不等用户触发；完成确认后立即开始下一圈。
+         * 车端仍可能在段末减速/微调；循环运行不等于全程速度不为零。
+         */
     }
-    while(1){delay_ms(1000);}
+
+failed:
+    printf("[DEMO] FAILED stage=%s reason=%s notice=0x%02X\r\n",
+           stage, DFQueue_LastError(), (unsigned)DFQueue_LastNotice());
+    DFQueue_Cancel();  /* 尝试取消队列并发零速；不会自动换接口或重跑路线。 */
+    while (1) {
+        Demo_Delay(1000);  /* 故障后保留遥测，不自动重试运动；排除故障后复位。 */
+    }
 }

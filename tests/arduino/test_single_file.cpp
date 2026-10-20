@@ -2,7 +2,7 @@
 #include <vector>
 
 #include "Arduino.h"
-#include "../../DFCom_Arduino/SingleFile/DcarON_Square_AllInOne/DcarON_Square_AllInOne.ino"
+#include "../../DFCom_Arduino/SingleFile/DcarON_Stadium_AllInOne/DcarON_Stadium_AllInOne.ino"
 
 HardwareSerial Serial;
 
@@ -83,24 +83,23 @@ int main()
     CHECK(g_now_ms >= 1000);
 
     Serial.testClear();
-    dcarMoveLinear(50, 0, 30, 2);
+    DFCom.moveLinear(50, 0, 30, 2);
     inject(progressFrame(0x64, 0xFF, 0x00));
-    dcarUpdate();
-    CHECK(dcarWaitDone(20));
+    DFCom.update();
+    CHECK(DFCom.waitDone(20));
 
-    dcarMoveLinear(50, 0, 30, 2);
-    dcarMoveLinear(-50, 0, 30, 2);
+    DFCom.moveLinear(50, 0, 30, 2);
+    DFCom.moveLinear(-50, 0, 30, 2);
     inject(progressFrame(0x64, 0xFF, 0x64));
-    dcarUpdate();
-    CHECK(dfCurrentSlot <= 1);
-    CHECK(mvSlots[dfCurrentSlot].progress == 0);
+    DFCom.update();
+    CHECK(DFCom.progress(0x64) == 0);
 
     inject(progressFrame(0x64, 0xFF, 0x00));
-    dcarUpdate();
-    CHECK(dcarWaitDone(20));
+    DFCom.update();
+    CHECK(DFCom.waitDone(20));
 
     Serial.testClear();
-    dcarSubscribeOdom(500);
+    DFCom.subscribeOdom(500);
     CHECK(Serial.testTx.size() == 11);
     CHECK(Serial.testTx[7] == 50);
 

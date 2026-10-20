@@ -75,6 +75,9 @@ class RosNodeTests(unittest.TestCase):
         self.nodes.append(node)
         self.executor.add_node(node)
         node.tick()
+        for _ in range(2):
+            node.next_subscription = 0
+            node.tick()
         return node
 
     def spin_until(self, predicate, timeout=5):
@@ -88,7 +91,7 @@ class RosNodeTests(unittest.TestCase):
         from geometry_msgs.msg import Twist
         from nav_msgs.msg import Odometry
         from sensor_msgs.msg import Imu
-        bridge = self.make_bridge(telemetry='odom', publish_imu=True, enable_cmd_vel=True)
+        bridge = self.make_bridge(enable_cmd_vel=True, publish_imu=True)
         peer = Node('test_subscriber', context=self.context)
         self.nodes.append(peer)
         self.executor.add_node(peer)
@@ -123,7 +126,8 @@ class RosNodeTests(unittest.TestCase):
         from geometry_msgs.msg import Twist
         node = self.make_bridge()
         port = self.ports[-1]
-        self.assertEqual(port.tx, [subscribe('odom')])
+        self.assertEqual(port.tx[:2], [subscribe('odom'), frame(0x0B,0x40)])
+        self.assertEqual(Parser().feed(port.tx[1])[0].a, 0x0B)
         self.assertIsNone(node.cmd_sub)
         self.assertIsNone(node.imu_pub)
         port.inject(odom_packet(), source=2)
@@ -133,7 +137,7 @@ class RosNodeTests(unittest.TestCase):
         node.tick()
         self.assertIsNotNone(node.last_rx)
         node.on_command(Twist())
-        self.assertEqual(len(port.tx), 1)
+        self.assertEqual(len(port.tx), 2)
 
     def test_timeout_invalid_command_and_disconnect(self):
         from geometry_msgs.msg import Twist
@@ -164,17 +168,16 @@ class RosNodeTests(unittest.TestCase):
         self.assertEqual(len(replacement.tx), 2)  # zero, then subscription; no replay
         self.assertEqual(Parser().feed(replacement.tx[0])[0].payload, bytes(12))
         before = len(replacement.tx)
-        node.on_command(command)  # no fresh telemetry after reconnect
-        self.assertEqual(len(replacement.tx), before)
+        node.on_command(command)  # Telemetry does not gate motion input.
+        self.assertEqual(len(replacement.tx), before + 1)
 
     def test_stale_telemetry_and_partial_write(self):
         node = self.make_bridge(enable_cmd_vel=True)
         port = self.ports[-1]
         node.connected_at = time.monotonic() - 3
         node.tick()
-        self.assertIsNone(node.port)
-        self.assertEqual(Parser().feed(port.tx[-1])[0].payload, bytes(12))
-        node.next_connect = 0
+        self.assertIsNotNone(node.port)
+        self.assertFalse(port.closed)
         node.tick()
         with patch.object(node.port, 'write', return_value=1):
             with self.assertRaises(serial.SerialException):
@@ -344,3 +347,22 @@ class RosNodeTests(unittest.TestCase):
             self.assertEqual(result.result().result.completed,2)
             self.assertEqual(result.result().result.notice,0x27)
         finally:client.destroy()
+
+    def test_unified_stream_and_telemetry_absence_do_not_gate_motion(self):
+        from geometry_msgs.msg import Twist
+        node = self.make_bridge(enable_cmd_vel=True)
+        port = self.ports[-1]
+        node.on_command(Twist())  # No telemetry has arrived.
+        self.assertEqual(Parser().feed(port.tx[-1])[0].payload, bytes(12))
+        port.inject(odom_packet())
+        port.inject(odom_packet())
+        node.tick()
+        self.assertEqual(node.telemetry.streams['odom'].ok, 2)
+        self.assertEqual(node.last_published[0], 'odom')
+        node.telemetry.streams['odom'].last_rx = time.monotonic()-1.5
+        port.inject(odom_packet())
+        node.tick()
+        self.assertEqual(node.last_published[0], 'odom')
+        node.last_rx = time.monotonic()-10
+        node.tick()
+        self.assertIsNotNone(node.port)
