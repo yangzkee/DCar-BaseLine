@@ -1,5 +1,9 @@
 # DcarON Arduino 客户端 (DFCom for Arduino)
 
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
+
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
+
 把 DcarON 小车的 DFCom_v2 协议移植到 **Arduino Uno / Nano (ATmega328P)**，
 对象式 API、学生友好单位（厘米 + 度），用你熟悉的 **Arduino IDE** 就能玩。
 

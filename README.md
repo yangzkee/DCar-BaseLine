@@ -1,9 +1,13 @@
-# 已被替代的归档版本
+# 归档代码
+
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
+
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
 
 > **被替代时间：2026-10-20 15:33（北京时间，UTC+08:00）。**
 > 本分支保存替代前的 main，代码基点为 `73198d40a78c8c4de64f354cecb7a16f0b1179e8`。
-> 当前使用版本请访问 [main](https://github.com/yangzkee/DCar-BaseLine/tree/main)，版本0.3.1，STM32/ROS运动示例使用队列v6。
-> 本分支不再代表当前使用方式；下方README仅描述归档版本。除本README的归档说明外，代码与文件保持原样。
+> 当前代码请访问 [main](https://github.com/yangzkee/DCar-BaseLine/tree/main)。
+> 本分支不再代表当前使用方式；下方 README 描述归档代码的使用方式。
 
 ---
 
@@ -17,7 +21,7 @@
 
 [选择平台](#platforms) · [下载例程](#download) · [学习路线](#learning) · [STM32 快速开始](#stm32) · [Arduino 快速开始](#arduino) · [修改与调试](#debugging) · [协议与单位](#protocol) · [参与维护](#contributing)
 
-[产品与完整教程](https://differ-tech.pages.dev/portal/view/dcar-fast-motion-control) · [DFLink V3 对外协议手册](DFLink_V3协议手册_对外版.md) · [版本下载](https://github.com/yangzkee/DCar-BaseLine/releases) · [问题反馈](https://github.com/yangzkee/DCar-BaseLine/issues)
+[产品与完整教程](https://differ-tech.pages.dev/portal/view/dcar-fast-motion-control) · [DFLink V3 对外协议手册](DFLink_V3协议手册_对外版.md) · [问题反馈](https://github.com/yangzkee/DCar-BaseLine/issues)
 
 <a id="platforms"></a>
 > ROS 2 与电赛路线已纳入统一主线。代码合入不代表所有硬件场景都已完成实测，具体范围见各平台的验证记录。
@@ -39,7 +43,6 @@
 <a id="download"></a>
 ## 2. 下载例程
 
-- **只想运行已有发布版：** 打开 [Releases](https://github.com/yangzkee/DCar-BaseLine/releases)，选择对应平台的附件。`v1.0.0` 提供 `DCar-STM32F103C8-Keil.zip` 和 `DCar-STM32F103C8-Arduino.zip`；附件具体支持的开发板以包内说明为准。
 - **想学习或修改当前源码：** 点击仓库绿色 **Code → Download ZIP**，解压后进入所选平台目录。
 - **使用 Git 持续维护：** 克隆仓库后进入所选目录，各平台独立使用，不必安装其他平台的开发环境。
 
@@ -48,7 +51,6 @@ git clone --branch main https://github.com/yangzkee/DCar-BaseLine.git
 cd DCar-BaseLine
 ```
 
-`main` 是稳定发布分支，`develop` 是开发集成分支；Release / 标签用于保存正式发布时的版本。发布附件不一定包含分支后续的修复，反馈问题时请注明分支、标签或提交号。
 
 <a id="learning"></a>
 ## 3. 从入门到修改的学习路线

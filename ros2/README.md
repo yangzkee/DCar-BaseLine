@@ -1,5 +1,9 @@
 # DcarON ROS 2 客户端
 
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
+
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
+
 **新手入口：[Windows 从安装到运行详细教程](docs/windows-tutorial.md)。**
 包含 GitHub 分支/目录说明、首次安装、每天启动、读取回传和分步运动测试。
 查接口和参数继续阅读本页，查动作字段见 [motion.md](docs/motion.md)。

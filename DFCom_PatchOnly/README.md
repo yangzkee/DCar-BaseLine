@@ -1,9 +1,12 @@
 # DcarON DFCom 客户端例程（精简教学版）
 
+官网：[differ-tech.pages.dev](https://differ-tech.pages.dev)
+
+淘宝搜索 **DCar**，认准 **“点浮科技”** 购买。
+
 > 面向 STM32F103C8T6 的移植补丁，通信核心集中在 3 个 DFCom 文件。
-> **协议版本**：SI 单位 + ROS REP-103 坐标系（与老版本不兼容！）
+> **通信约定**：SI 单位 + ROS REP-103 坐标系
 > **默认入参单位**：厘米 + 度（学生友好；可一键切到 SI 米/弧度）
-> 官网：<https://differ-tech.pages.dev/>
 
 ## 这是什么
 
@@ -66,7 +69,7 @@ DFCom_PatchOnly/
 
 ## ★ 坐标系与单位约定（重要！）
 
-协议层底层用 **SI 单位** + **ROS REP-103** 坐标系（与老版本不兼容），
+协议层底层用 **SI 单位** + **ROS REP-103** 坐标系，
 但客户端例程允许用户**用厘米 + 度调用**，由本库内部自动转换：
 
 | 项目 | CM 模式 (默认) | M 模式 (SI) |
@@ -272,7 +275,7 @@ Cmd_Move_Vel(0, 0, 0);                         // 主动停车
 - 检查小车 USART1 默认是不是 460800（出厂默认是）
 - 检查 `Cmd_Move_*` 的参数单位：默认 CM 模式 = `cm/cm-per-s/deg/deg-per-s`，
   切到 SI 模式才是 `m/m-per-s/rad/rad-per-s`
-- 检查 px/py 顺序是不是搞反了：**新协议 +X 前 / +Y 左**，跟老版本对调
+- 检查 px/py 顺序是不是搞反了：**新协议 +X 前 / +Y 左**
 
 **Q: 数值很小，传 `0.5` 小车不动**
 - 默认是 CM 模式 (`g_dfcom_unit_mode = DFCOM_UNIT_CM`)，`0.5` 被当作 0.5 cm = 5 mm 走完就停了，看着像没动
