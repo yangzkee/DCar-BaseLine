@@ -6,6 +6,8 @@
 
 外部控制板程序，使用 DFLink 队列 v6。打开 [USER/Template.uvprojx](USER/Template.uvprojx)，实际运动直接看 [USER/main.c](USER/main.c)。
 
+统一 Odom 使用 `A=0x6C/B=0x80`、51字节、格式号4。Pro提供完整数据；Std的roll/pitch、三轴加速度和三轴角速度为零占位，不能当成真实IMU测量；Mini/SE不开放里程计。
+
 ## 目录
 
 - [编译、下载与接线](#编译下载与接线)
@@ -27,7 +29,7 @@
 
 ## 自动操场循环
 
-烧录后无须改模式或运动开关。上电两次零速之间等待1000ms，独立订阅Odom和VelPos（间隔20ms），固定观察500ms，等待50ms启用业务会话，再倒计时3000ms。
+烧录后无须改模式或运动开关。上电两次零速之间等待1000ms，订阅 Odom，间隔20ms后查询状态，固定观察500ms，等待50ms启用业务会话，再倒计时3000ms。
 状态 / 遥测缺失只报告，不延长观察窗口、不阻止运动；队列能力、空闲状态、ACK、DONE和超时仍必须通过。
 
 每圈连续入队四条：半径0.30m倒行半圆 → 后退0.60m → 同样倒行半圆 → 后退0.60m同时转2π。速度请求0.15m/s，加速度档位18。
@@ -41,26 +43,21 @@ USART1用1024字节循环DMA持续接收；DMA TC中断记录环回，USART错�
 TIM2只维护1ms tick，不打印、不解析。主循环和等待循环调用 Poll；默认延时每5ms服务，队列等待每1ms服务。
 USART2使用2048字节非阻塞发送环和TXE中断；满时丢日志并累计 `g_usart2_log_dropped`，不会等待日志端。
 
-main默认开启Odom订阅、VelPos订阅、状态查询和日志，四项独立。关闭任一订阅或日志不会停止运动；日志关闭也必须继续Poll收帧。
-日志总开关为 `g_print_odom_enable`，`g_print_velpos_enable/g_print_full_odom_enable` 分别控制两种输出。这些是业务定制入口，运行现成测试无需修改。
+main固定订阅 Odom，并查询状态和输出日志。遥测/状态仅报告；日志关闭也必须继续Poll收帧。
+日志总开关为 `g_print_odom_enable`，不影响 Odom 接收、计时或运动。运行现成测试无需修改。
 
-`g_odom` 与 `g_velpos` 分别保存真实数据；不会交替订阅或复制另一种数据作为本流。Odom最近1秒有更新时与VelPos一起打印，Odom缺失只用VelPos；VelPos超时显示 `NO FRESH DATA`。
+`g_odom` 保存统一 Odom 数据。最近1秒有更新时打印姿态、位置、速度和IMU；缺首帧或超时显示 `[ODOM] NO FRESH DATA`，不输出旧数值。
 解析与打印均在主循环，串口IRQ只处理硬件状态。不要在ISR再次喂同一串字节。
 
 ## 诊断与验收
 
-- `[INIT]`：状态、校准和两类帧数，仅报告。
+- `[INIT]`：状态、校准和Odom帧数，仅报告。
 - `[QUEUE] ... segment=n/4 ... DONE notice=...`：逐段结果；入队ACK不算完成。
 - `[LAP] START/DONE n`：完成圈数持续增长，整圈四段都成功才计数。
 - `[UART1] bytes/dropped/overflows/errors`：字节与接收异常，后三项应保持0。
-- `[RX] ... wire/ok/reject/len/ver`：外层有效帧、成功解析、负载拒绝和最近格式。Odom要求len>=51、ver=4；VelPos要求len>=35、ver=2。
-- 两类wire与ok应同时持续增长至少60秒，多次复位检查；只有一种更新不能当双流通过。
+- `[RX] ... wire/ok/reject/len/ver`：外层有效帧、成功解析、负载拒绝和最近格式。Odom要求len>=51、ver=4。
+- Odom wire与ok持续增长至少60秒，reject不增长，并多次复位检查。
 
 `wire`增长但`ok`不增长时查看负载长度 / 版本；`wire=0`表示未收到该类型有效帧。
 接收服务超过缓冲可覆盖的时间未运行时，驱动记录溢出、丢弃残帧并从完整有效帧重新同步。1024字节约容纳22ms满速流量，业务必须按默认频率服务Poll。
 任务DONE不代替实车轨迹精度验收；遥测新鲜度提示不是硬件停车保障，断线时不能确认取消 / 零速送达。
-
-
-## 2026-10-20 统一 Odometry
-
-STM32 和 ROS 默认统一订阅 `A=0x04/B=0x80`，回传 `A=0x6C/B=0x80`（v4、51B）。已删除其 VelPos 0x81 订阅和解析入口；下文历史双流描述以本节为准。保留新鲜度、DMA接收、队列任务ID及连续操场功能。Pro返回完整数据，Std的roll/pitch、三轴加速度、三轴角速度填0；Mini/SE不开放里程计。ROS只有明确设置 `publish_imu: true` 才发布 IMU，默认false以免把Std填零当作测量。BDB的A02/B81定位命令不受影响。

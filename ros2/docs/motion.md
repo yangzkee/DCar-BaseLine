@@ -7,7 +7,7 @@
 
 `ros2 launch dcaron_bridge stadium_test.launch.py port:=COM5` 同时启动桥接和持续操场客户端。
 每圈四段入队、整圈成功后立即下一圈，任一圈失败结束测试；不需额外执行参数或切换模式。
-Odom、VelPos和状态仅独立报告，不作为运动启动条件；任务握手、ACK/DONE与自身超时必须通过。
+Odom和状态仅独立报告，不作为运动启动条件；任务握手、ACK/DONE与自身超时必须通过。
 下方单动作和YAML入口用于自定义应用。
 
 ## 单动作 /motion

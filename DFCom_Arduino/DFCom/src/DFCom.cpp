@@ -295,7 +295,7 @@ void DFCom_t::moveArc(float radius, float dyaw, float speed, uint8_t profile)
 }
 
 /* ===========================================================================
- * 里程计订阅 (A=0x04 DataRecivViitClass, B=0x80/0x81) / 状态查询
+ * 里程计订阅 (A=0x04 DataRecivViitClass, B=0x80) / 状态查询
  * ===========================================================================*/
 static uint8_t visit_freq_code(uint16_t freqHz)
 {
@@ -319,14 +319,6 @@ void DFCom_t::subscribeOdom(uint16_t freqHz, uint8_t mode)
     uint8_t vtype = visit_type_code(mode);
     uint8_t p[2] = { vtype, fcode };
     _frame(0x04, 0x80, p, 2);
-}
-
-void DFCom_t::subscribeVelPos(uint16_t freqHz, uint8_t mode)
-{
-    uint8_t fcode = visit_freq_code(freqHz);
-    uint8_t vtype = visit_type_code(mode);
-    uint8_t p[2] = { vtype, fcode };
-    _frame(0x04, 0x81, p, 2);
 }
 
 void DFCom_t::queryState()
@@ -387,10 +379,10 @@ void DFCom_t::_feed(uint8_t b)
 
 void DFCom_t::_dispatch(uint8_t A, uint8_t B, const uint8_t *p, uint8_t len)
 {
-    if (A == 0x6C && (B == 0x80 || B == 0x81)) {
-        DFStreamDiag &diag = B == 0x80 ? odomDiag : velposDiag;
+    if (A == 0x6C && B == 0x80) {
+        DFStreamDiag &diag = odomDiag;
         diag.wire++; diag.len = len; diag.version = len ? p[0] : 0;
-        if (len < (B == 0x80 ? 51 : 35) || diag.version != (B == 0x80 ? 4 : 2)) diag.rejected++;
+        if (len < 51 || diag.version != 4) diag.rejected++;
     }
     if (A == 0x6C && B == 0x80 && len >= 51 && p[0] == 0x04) {
         /* DF_odom 全量 51B */
@@ -417,24 +409,6 @@ void DFCom_t::_dispatch(uint8_t A, uint8_t B, const uint8_t *p, uint8_t len)
         odom.localTickMs = millis();
         odom.frameCount++;
         odom.fresh = 1;
-    }
-    else if (A == 0x6C && B == 0x81 && len >= 35 && p[0] == 0x02) {
-        /* DF_vel_pose 简化 35B */
-        velpos.yaw   = rd_s16(&p[1])  / SC_ANGLE;
-        velpos.bVelX = rd_s16(&p[3])  / SC_VEL;
-        velpos.bVelY = rd_s16(&p[5])  / SC_VEL;
-        velpos.bVelZ = rd_s16(&p[7])  / SC_VEL;
-        velpos.nVelX = rd_s16(&p[9])  / SC_VEL;
-        velpos.nVelY = rd_s16(&p[11]) / SC_VEL;
-        velpos.nVelZ = rd_s16(&p[13]) / SC_VEL;
-        velpos.posX  = rd_s32(&p[15]) / SC_POS;
-        velpos.posY  = rd_s32(&p[19]) / SC_POS;
-        velpos.posZ  = rd_s32(&p[23]) / SC_POS;
-        velpos.carTimeS  = rd_u32(&p[27]);
-        velpos.carTimeUs = rd_u32(&p[31]);
-        velpos.localTickMs = millis();
-        velpos.frameCount++;
-        velpos.fresh = 1;
     }
     else if (A == 0x6F && len >= 2) {
         /* 运动完成/进度回传, B = 原 cmd 码 */

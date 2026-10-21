@@ -9,7 +9,6 @@ volatile u32 g_local_tick_ms = 0;
 
 /* ---- 控制是否自动打印（学生可以临时关掉） ---- */
 volatile u8 g_print_odom_enable = 1;
-volatile u8 g_print_full_odom_enable = 1;
 
 /* ===========================================================================
  * TIM2 初始化：1ms 中断
@@ -63,26 +62,23 @@ void DFCom_Poll(void)
     if (!g_print_odom_enable) return;
     if ((u32)(now - last_print) >= 100) {
         last_print = now;
-        if (g_print_full_odom_enable && g_odom.frame_count &&
-            (u32)(now - g_odom.local_tick_ms) < 1000) Odom_Print();
+        Odom_Print();
     }
     if ((u32)(now - last_diag) >= 1000) {
         last_diag = now;
         printf("[UART1] bytes=%lu dropped=%lu overflows=%lu errors=%lu\r\n",
                (unsigned long)g_usart1_rx_bytes, (unsigned long)g_usart1_rx_dropped,
                (unsigned long)g_usart1_rx_overflows, (unsigned long)g_usart1_rx_errors);
-        printf("[RX] odom wire=%lu ok=%lu reject=%lu len=%u ver=%u; "
-               "\r\n",
+        printf("[RX] odom wire=%lu ok=%lu reject=%lu len=%u ver=%u\r\n",
                (unsigned long)g_dfcom_rx_diag.odom_wire, (unsigned long)g_odom.frame_count,
                (unsigned long)g_dfcom_rx_diag.odom_rejected,
                (unsigned)g_dfcom_rx_diag.odom_len, (unsigned)g_dfcom_rx_diag.odom_version);
     }
 }
 
-
-
-
-
+/* Odom提供姿态、IMU、车体/固定里程计系速度与位置，SI单位。
+ * N系为固定里程计坐标系，B系跟随车身；+X前、+Y左、+Z上。
+ * 仅主循环打印；缺首帧或超过1秒未更新时报告缺失，不输出旧数值。 */
 void Odom_Print(void)
 {
     /* 取一份"瞬时快照" */
@@ -100,8 +96,8 @@ void Odom_Print(void)
     snap.gyro_z_rps   = g_odom.gyro_z_rps;      /* B 系 Z 角速度 */
     snap.frame_count  = g_odom.frame_count;
 
-    if (snap.frame_count == 0) {
-        printf("[ODOM] (no data yet, send Cmd_Subscribe_Odom?)\r\n");
+    if (snap.frame_count == 0 || (u32)(g_local_tick_ms - g_odom.local_tick_ms) >= 1000) {
+        printf("[ODOM] NO FRESH DATA\r\n");
         return;
     }
 

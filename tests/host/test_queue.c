@@ -48,9 +48,8 @@ static void telemetry_reply(u8 b, u8 len, u8 ver) {
     DFCom_RxParse(frame,(u16)(len+9));
 }
 int main(void){
-    u16 a,b,c,sum;u8 p,n,i;
+    u16 a,b,c;u8 p,n,i;
     u8 joined[26];
-    u8 telemetry[44]={0xdf,DFCOM_PC_ID,DFCOM_ROBOT_ID,0x6c,0x81,35,2};
     u8 bad_length[6]={0xdf,DFCOM_PC_ID,DFCOM_ROBOT_ID,0x6f,0x85,60};
     assert(DFQueue_Begin());drop_ack=1;
     a=DFQueue_Linear(.1f,0,.06f,0,18);assert(a==65535 && tx[4]==0x64 && tx[5]==15 && txlen==24);
@@ -97,22 +96,15 @@ int main(void){
     make_reply(joined,255,0,a);make_reply(joined+13,255,0,b);
     DFCom_RxParse(joined,sizeof(joined)); /* two terminal frames in one receive */
     assert(DFQueue_Wait(a,100)==DF_QUEUE_WAIT_DONE && DFQueue_Wait(b,100)==DF_QUEUE_WAIT_DONE);
-    telemetry[41]=0xfd;sum=0;for(i=0;i<42;i++)sum+=telemetry[i];
-    telemetry[42]=(u8)sum;telemetry[43]=(u8)(sum>>8);
-    for(i=0;i<44;i++)DFCom_RxParse(telemetry+i,1);
-    assert(g_odom.frame_count==0); /* removed 0x81 ignored */
     Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS,10);
     assert(tx[3]==4 && tx[4]==0x80 && tx[5]==2 && tx[6]==1 && tx[7]==1);
     telemetry_reply(0x80,51,4);
-    telemetry_reply(0x81,35,2);
     telemetry_reply(0x80,51,4);
-    telemetry_reply(0x81,35,2);
-    assert(g_odom.frame_count==2);
-    assert(g_dfcom_rx_diag.odom_wire==2);
-    telemetry_reply(0x81,35,3);
-    telemetry_reply(0x81,0,0);
+    assert(g_odom.frame_count==2 && g_dfcom_rx_diag.odom_wire==2);
+    telemetry_reply(0x81,35,2); /* Unsupported telemetry cannot update Odom. */
+    assert(g_odom.frame_count==2 && g_dfcom_rx_diag.odom_wire==2);
     telemetry_reply(0x80,50,4);
-    assert(g_odom.frame_count==2);
-    assert(g_dfcom_rx_diag.odom_rejected==1);
+    telemetry_reply(0x80,51,3);
+    assert(g_odom.frame_count==2 && g_dfcom_rx_diag.odom_rejected==2);
     puts("queue wire, rollover, duplicate, trim, query, failures and fragmented/coalesced RX passed");return 0;
 }

@@ -169,7 +169,7 @@ class DcaronBridge(Node):
                     self.stop()
                 self.pending_subscriptions = list(self.subscription_frames)
                 self.next_subscription = now
-                self.get_logger().info("Serial connected; independent telemetry/state requests scheduled")
+                self.get_logger().info("Serial connected; Odom/state requests scheduled")
             if self.pending_subscriptions and now >= self.next_subscription:
                 self.write(self.pending_subscriptions.pop(0))
                 self.next_subscription = now + 0.02  # Independent requests, once per connection.
@@ -246,7 +246,7 @@ class DcaronBridge(Node):
             for index in (21, 28, 35):
                 odom.twist.covariance[index] = 0.1
         (publisher if publisher is not None else self.odom_pub).publish(odom)
-        if publish_imu and state.gyro is not None:
+        if publish_imu and self.imu_pub is not None and state.gyro is not None:
             imu = Imu()
             imu.header.stamp = stamp
             imu.header.frame_id = self.cfg["imu_frame"]
@@ -257,7 +257,7 @@ class DcaronBridge(Node):
             imu.angular_velocity.x, imu.angular_velocity.y, imu.angular_velocity.z = state.gyro
             imu.linear_acceleration.x, imu.linear_acceleration.y, imu.linear_acceleration.z = state.acceleration
             # All-zero covariance means unknown per sensor_msgs/Imu.
-            if self.imu_pub is not None: self.imu_pub.publish(imu)
+            self.imu_pub.publish(imu)
         if publish_tf and self.tf is not None:
             transform = TransformStamped()
             transform.header = odom.header

@@ -64,8 +64,7 @@ def main():
     try:
         bridge = DcaronBridge(serial_factory=LoggedSerial, parameter_overrides=[
             Parameter('port', value=options.port),
-            Parameter('enable_motion_actions', value=bool(options.degrees)),
-            Parameter('telemetry', value='velpos')])
+            Parameter('enable_motion_actions', value=bool(options.degrees))])
         peer = Node('rotation_probe_client')
         peer.create_subscription(Odometry, 'odom', odom, 10)
         executor = SingleThreadedExecutor()

@@ -56,7 +56,7 @@ id = DFQueue_Linear(-0.60f, 0.0f, 0.15f, 6.283185307f, 18);
 
 后一例的yaw编码约为62831，表示相对转角+2π；不能把它归一化成0，否则会丢掉整圈转向要求。
 两种直线的接收格式都使用队列统一回包 `A=0x6F/B=0x85, process:U8 + notice:U8 + ID:U16LE`，根据ID对应任务。
-Odom/VelPos用于观察姿态、速度和位置，不代替该ID的完成回包。
+Odom用于观察姿态、速度和位置，不代替该ID的完成回包。
 
 ROS队列输入当前仍沿用字段名 `profile`，编码器把其16..20值装入上述grade字节；该名字是客户端接口现状，不是当前队列多出一种运动模式。下文无ID接口仅供核对独立功能，不用于解释这里的队列直线。
 
@@ -163,25 +163,15 @@ STM32返回1成功、2超时/未知ID/零时限、3设备故障；用 `DFQueue_L
 | 发送A/B | payload | 含义 |
 |---|---|---|
 | 0x02/0x62 | vx,vy,wz，三个S32×10000 | 持续车体速度；发全零主动停车，无任务完成回包 |
-| 0x04/0x81 | mode:U8, freq_code:U8 | 标准VelPos订阅 |
-| 0x04/0x80 | mode:U8, freq_code:U8 | Pro全量Odom订阅，须设备支持 |
+| 0x04/0x80 | mode:U8, freq_code:U8 | 统一Odom订阅 |
 | 0x0B/0x40 | 空 | STM32启动时查询校准/控制状态 |
 
 mode=1连续、2单次。客户端“停止订阅”编码为单次模式，使连续推送结束；不是单独的停止确认。
 freq_code为Hz/10：10→1、50→5、100→10、200→20、250→25、500→50；ROS还支持1000→100。STM32其他输入回落为10Hz。
 
-标准VelPos回包A=0x6C/B=0x81、LEN=35、首字节version=2：
+统一 Odom 使用 `A=0x6C/B=0x80`、51字节、格式号4。Pro提供完整数据；Std的roll/pitch、三轴加速度和三轴角速度为零占位，不能当成真实IMU测量；Mini/SE不开放里程计。 ROS通过 `publish_imu` 控制IMU发布，默认false。
 
-| payload偏移 | 内容 | 类型 / 缩放 |
-|---|---|---|
-| 0 | version=2 | U8 |
-| 1 | yaw | S16 /10000，rad |
-| 3,5,7 | 车体系vx,vy,vz | S16 /5000，m/s |
-| 9,11,13 | 固定里程计系vx,vy,vz | S16 /5000，m/s |
-| 15,19,23 | 固定里程计系x,y,z | S32 /1000，m |
-| 27,31 | 车端原始timestamp_ms、timestamp_us | U32小端 |
-
-Pro Odom回包A=0x6C/B=0x80、LEN=51、首字节version=4：
+Odom回包A=0x6C/B=0x80、LEN=51、首字节version=4：
 
 | payload偏移 | 内容 | 类型 / 缩放 |
 |---|---|---|
@@ -258,16 +248,16 @@ ROS还提供十字标接口：发送 `A=0x02, B=0x80/0x81`，payload为mode单�
 STM32 Example/PatchOnly的集成示例按以下顺序执行：
 
 1. 初始化车端串口460800/8N1、日志串口115200/8N1；向车端发送零速度，等待约1秒后再发零速度。
-2. 分别发送Odom和VelPos的10Hz连续订阅，再发送状态查询；服务接收并输出观察日志，等待运动前的3秒启动延时。任何一种遥测缺失都不自动阻止后续队列握手。
+2. 发送 Odom 10Hz连续订阅，间隔20ms后查询状态；服务接收并输出观察日志，等待运动前的3秒启动延时。Odom缺失不自动阻止后续队列握手。
 3. 发送队列能力查询，要求能力值至少为6；查询下一ID，要求编号非零且process=16，表示设备16个队列槽空闲。
 4. 按顺序入队四段：半径0.30m、yaw=+π、speed=-0.15m/s的倒行半圆；x=-0.60m的后退；同样倒行半圆；x=-0.60m同时yaw=+2π。直线speed=+0.15m/s，grade=18。
 5. 每次提交等待入队确认或后续有效状态，然后提交下一段；四段提交完成后，依次等待各ID成功终态。不是等待第一段完成才提交第二段。
 6. 四段完成立即回到能力/下一ID握手，开始下一圈；软件没有圈间等待。车端仍可在段末减速或微调，循环不等于全程速度非零。
 7. 任一失败尝试发送取消队列和零速度，停止自动发新任务，不自动改用无ID运动重跑。
 
-ROS默认使用同样的队列编码和四段参数；Arduino使用无ID逐段发送、逐段等待完成的方式，通信时序不同。支持队列和支持Odom是两项独立能力，不能根据其中一项推断另一项。
+ROS默认使用同样的队列编码和四段参数；Arduino使用无ID逐段发送、逐段等待完成的方式，通信时序不同。队列回包与 Odom 遥测分别处理。
 
-Odom和VelPos始终独立订阅、保存、计数。STM32/Arduino不把VelPos复制进Odom；ROS的统一 `/odom` 输出优先选择新鲜Odom，再用新鲜VelPos兜底，同时保留两路独立遥测。选择输出源是客户端策略，不是车端只允许二选一。
+所有平台只订阅、解析和保存 Odom。ROS的 `/odom`、IMU和TF只使用新鲜 Odom，断更超过1秒后不发布旧值，有效新帧到达后恢复。
 
 ## 9. 串口抓包示例
 
@@ -279,14 +269,13 @@ Odom和VelPos始终独立订阅、保存、计数。STM32/Arduino不把VelPos复
 | 接收示例：能力值6 | `DF 97 01 6F 85 04 10 21 06 00 FD A3 03` |
 | 发送：查询下一ID | `DF 01 97 02 85 01 07 FD 03 03` |
 | 接收示例：16槽空闲、下一ID7 | `DF 97 01 6F 85 04 10 28 07 00 FD AB 03` |
-| 发送：VelPos连续10Hz | `DF 01 97 04 81 02 01 01 FD FD 02` |
 | 发送：Odom连续10Hz | `DF 01 97 04 80 02 01 01 FD FC 02` |
 | 发送：状态查询 | `DF 01 97 0B 40 00 FD BF 02` |
 | 接收示例：ID7入队确认 | `DF 97 01 6F 85 04 00 10 07 00 FD 83 03` |
 | 接收示例：ID7正常完成 | `DF 97 01 6F 85 04 FF 00 07 00 FD 72 04` |
 
 接收示例是按客户端格式构造的报文，供核对字段和校验，不代表一次真实串口抓包。
-例如最后一帧的payload为 `FF 00 07 00`：完成、正常、任务ID7。它与Odom/VelPos收到多少帧无关。
+例如最后一帧的payload为 `FF 00 07 00`：完成、正常、任务ID7。它与Odom收到多少帧无关。
 
 ## 10. 实现范围与确认边界
 
@@ -294,7 +283,7 @@ Odom和VelPos始终独立订阅、保存、计数。STM32/Arduino不把VelPos复
 |---|---|
 | 外层帧、命令号、字段顺序和缩放 | 可从STM32、Arduino、ROS编码和解析代码直接确认 |
 | 队列能力、任务ID、ACK和DONE | STM32和ROS已实现，Arduino未实现队列 |
-| 遥测长度检查 | STM32/Arduino接受Odom长度至少51、VelPos至少35且格式号匹配；ROS要求恰好51/35 |
+| 遥测长度检查 | STM32/Arduino接受Odom长度至少51且格式号4；ROS要求恰好51字节且格式号4 |
 | 接收地址与帧校验 | STM32在流解析中检查地址；ROS通用Parser只检帧尾与校验，地址由上层消费逻辑过滤 |
 | 圆弧负速度 | STM32队列、ROS队列、Arduino无ID接口允许；STM32无IDCmd_Move_Arc和ROS无ID编码器要求正速度 |
 | 车端时间字段 | 客户端接收两个U32原始数；注释称timestamp_ms/us，两个计数的精确关系、回绕和同步规则需车端确认 |
@@ -303,8 +292,3 @@ Odom和VelPos始终独立订阅、保存、计数。STM32/Arduino不把VelPos复
 | 固件更新范围 | 本仓库只有客户端，不能据此断言所有车端型号已升级或所有固件均支持上述功能 |
 
 核对源码入口：[STM32发送](../DFCom_Example/HARDWARE/DFCom_Tx.c)、[STM32接收](../DFCom_Example/HARDWARE/DFCom_Rx.c)、[STM32主循环](../DFCom_Example/USER/main.c)、[Arduino](../DFCom_Arduino/DFCom/src/DFCom.cpp)、[ROS公共协议](../ros2/dcaron_bridge/dcaron_bridge/protocol.py)、[ROS队列](../ros2/dcaron_bridge/dcaron_bridge/queue.py)、[ROS无ID运动](../ros2/dcaron_bridge/dcaron_bridge/motion.py)。
-
-
-## 2026-10-20 统一 Odometry
-
-STM32 和 ROS 默认统一订阅 `A=0x04/B=0x80`，回传 `A=0x6C/B=0x80`（v4、51B）。已删除其 VelPos 0x81 订阅和解析入口；下文历史双流描述以本节为准。保留新鲜度、DMA接收、队列任务ID及连续操场功能。Pro返回完整数据，Std的roll/pitch、三轴加速度、三轴角速度填0；Mini/SE不开放里程计。ROS只有明确设置 `publish_imu: true` 才发布 IMU，默认false以免把Std填零当作测量。BDB的A02/B81定位命令不受影响。

@@ -64,18 +64,6 @@ struct DFOdom {
     uint8_t  fresh;
 };
 
-/* 简化里程计 (DF_vel_pose) */
-struct DFVelPos {
-    float yaw;
-    float bVelX, bVelY, bVelZ;
-    float nVelX, nVelY, nVelZ;
-    float posX, posY, posZ;
-    uint32_t carTimeS, carTimeUs;
-    uint32_t frameCount;
-    uint32_t localTickMs;
-    uint8_t  fresh;
-};
-
 /* 小车激活/校准状态 */
 struct DFState {
     uint8_t received;        /* 1 = 收到过回传 (链路活) */
@@ -116,7 +104,6 @@ public:
 
     /* ---- 里程计订阅 / 状态查询 ---- */
     void subscribeOdom(uint16_t freqHz = 10, uint8_t mode = DFCOM_MODE_CONTINUOUS);
-    void subscribeVelPos(uint16_t freqHz = 10, uint8_t mode = DFCOM_MODE_CONTINUOUS);
     void queryState();
 
     /* ---- 必须在 loop() 里(或 waitDone 内部)调, 收+解析回传 ---- */
@@ -133,12 +120,10 @@ public:
 
     /* ---- 数据 (SI 原生, 直接读) ---- */
     DFOdom   odom;
-    DFVelPos velpos;
     DFState  state;
-    DFStreamDiag odomDiag, velposDiag;
+    DFStreamDiag odomDiag;
     uint32_t rxBytes = 0;
     bool odomAvailable() const { return odom.frameCount && (uint32_t)(millis()-odom.localTickMs)<1000; }
-    bool velposAvailable() const { return velpos.frameCount && (uint32_t)(millis()-velpos.localTickMs)<1000; }
     void serviceDelay(uint32_t ms); /* 延时期间持续收帧；日志/状态不阻塞运动。 */
 
     /* ---- 友好取值 (换成 cm / 度) ---- */
@@ -168,7 +153,7 @@ private:
     uint8_t _sendFailed = 0;
     uint8_t _failedCmd = 0;
 
-    /* 有界字节流缓存；保留残帧，扫描后续有效帧，支持双遥测粘连。 */
+    /* 有界字节流缓存；保留残帧，扫描后续有效帧，支持遥测与任务回包粘连。 */
     uint8_t _buf[72];
     uint8_t _idx = 0;
 
@@ -489,7 +474,7 @@ void DFCom_t::moveArc(float radius, float dyaw, float speed, uint8_t profile)
 }
 
 /* ===========================================================================
- * 里程计订阅 (A=0x04 DataRecivViitClass, B=0x80/0x81) / 状态查询
+ * 里程计订阅 (A=0x04 DataRecivViitClass, B=0x80) / 状态查询
  * ===========================================================================*/
 static uint8_t visit_freq_code(uint16_t freqHz)
 {
@@ -513,14 +498,6 @@ void DFCom_t::subscribeOdom(uint16_t freqHz, uint8_t mode)
     uint8_t vtype = visit_type_code(mode);
     uint8_t p[2] = { vtype, fcode };
     _frame(0x04, 0x80, p, 2);
-}
-
-void DFCom_t::subscribeVelPos(uint16_t freqHz, uint8_t mode)
-{
-    uint8_t fcode = visit_freq_code(freqHz);
-    uint8_t vtype = visit_type_code(mode);
-    uint8_t p[2] = { vtype, fcode };
-    _frame(0x04, 0x81, p, 2);
 }
 
 void DFCom_t::queryState()
@@ -581,10 +558,10 @@ void DFCom_t::_feed(uint8_t b)
 
 void DFCom_t::_dispatch(uint8_t A, uint8_t B, const uint8_t *p, uint8_t len)
 {
-    if (A == 0x6C && (B == 0x80 || B == 0x81)) {
-        DFStreamDiag &diag = B == 0x80 ? odomDiag : velposDiag;
+    if (A == 0x6C && B == 0x80) {
+        DFStreamDiag &diag = odomDiag;
         diag.wire++; diag.len = len; diag.version = len ? p[0] : 0;
-        if (len < (B == 0x80 ? 51 : 35) || diag.version != (B == 0x80 ? 4 : 2)) diag.rejected++;
+        if (len < 51 || diag.version != 4) diag.rejected++;
     }
     if (A == 0x6C && B == 0x80 && len >= 51 && p[0] == 0x04) {
         /* DF_odom 全量 51B */
@@ -611,24 +588,6 @@ void DFCom_t::_dispatch(uint8_t A, uint8_t B, const uint8_t *p, uint8_t len)
         odom.localTickMs = millis();
         odom.frameCount++;
         odom.fresh = 1;
-    }
-    else if (A == 0x6C && B == 0x81 && len >= 35 && p[0] == 0x02) {
-        /* DF_vel_pose 简化 35B */
-        velpos.yaw   = rd_s16(&p[1])  / SC_ANGLE;
-        velpos.bVelX = rd_s16(&p[3])  / SC_VEL;
-        velpos.bVelY = rd_s16(&p[5])  / SC_VEL;
-        velpos.bVelZ = rd_s16(&p[7])  / SC_VEL;
-        velpos.nVelX = rd_s16(&p[9])  / SC_VEL;
-        velpos.nVelY = rd_s16(&p[11]) / SC_VEL;
-        velpos.nVelZ = rd_s16(&p[13]) / SC_VEL;
-        velpos.posX  = rd_s32(&p[15]) / SC_POS;
-        velpos.posY  = rd_s32(&p[19]) / SC_POS;
-        velpos.posZ  = rd_s32(&p[23]) / SC_POS;
-        velpos.carTimeS  = rd_u32(&p[27]);
-        velpos.carTimeUs = rd_u32(&p[31]);
-        velpos.localTickMs = millis();
-        velpos.frameCount++;
-        velpos.fresh = 1;
     }
     else if (A == 0x6F && len >= 2) {
         /* 运动完成/进度回传, B = 原 cmd 码 */
@@ -683,8 +642,8 @@ uint8_t DFCom_t::progress(uint8_t cmdCode)
 /* Uno/Nano持续操场测试：Serial连接车端115200，TX经5V->3.3V转换。
  * 每圈四段；自然完成后立即下一段/下一圈，任一步失败停车并停止新任务。
  * 无ID接口按段等待，不模拟v6队列。需要全向底盘及相应车端运动能力。
- * 独立订阅Odom/VelPos，查询状态仅报告；不等待遥测才运动。
- * 数据与计数通过DFCom.odom/velpos/state/odomDiag/velposDiag读取。
+ * 只订阅Odom，查询状态仅报告；不等待遥测才运动。
+ * 数据与计数通过DFCom.odom/state/odomDiag读取。
  * Uno唯一硬件串口留给车端；不使用会屏蔽接收中断的SoftwareSerial日志。
  */
 
@@ -697,7 +656,6 @@ void setup()
     DFCom.begin(115200);              // 双停车，上电1000ms与会话间隔50ms
     DFCom.subscribeOdom(10);
     DFCom.serviceDelay(20);
-    DFCom.subscribeVelPos(10);
     DFCom.queryState();
     DFCom.serviceDelay(500);          // 固定观察窗口，不以状态/遥测作为门禁
     DFCom.serviceDelay(3000);         // 首圈前等待，后续各圈无延时

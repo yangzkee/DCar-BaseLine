@@ -1,4 +1,10 @@
-
+/* DCar串口接收与状态分发。
+ * DFCom_RxParse保存跨调用残帧，校验地址/帧尾/累加和，处理噪声与多帧。
+ * 遥测：0x6C/0x80统一Odom。
+ * 队列：0x6F/0x85含任务ID，状态交给Tx中的队列模块。
+ * 无ID运动：0x6F/0x63..66使用本文件A/B本地槽；它们不等于车端任务ID。
+ * 状态：0x8C/0x40含校准与控制参数。解析数据保存为SI，不受单位开关影响。
+ */
 #include "DFCom.h"
 #include "usart.h"
 #include "delay.h"
@@ -286,10 +292,6 @@ static void parse_odom_v4(const u8 *payload, u8 payload_len)
     g_odom.frame_count++;
     g_odom.fresh = 1;
 }
-
-
-
-
 
 /*============================================================================
  *  解析 2：运动完成回传 ProgressBack (A=0x6F, B=cmd)

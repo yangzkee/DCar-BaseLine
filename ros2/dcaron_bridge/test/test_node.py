@@ -126,7 +126,7 @@ class RosNodeTests(unittest.TestCase):
         from geometry_msgs.msg import Twist
         node = self.make_bridge()
         port = self.ports[-1]
-        self.assertEqual(port.tx[:2], [subscribe('odom'), frame(0x0B,0x40)])
+        self.assertEqual(port.tx, [subscribe('odom'), frame(0x0B, 0x40)])
         self.assertEqual(Parser().feed(port.tx[1])[0].a, 0x0B)
         self.assertIsNone(node.cmd_sub)
         self.assertIsNone(node.imu_pub)
@@ -348,21 +348,19 @@ class RosNodeTests(unittest.TestCase):
             self.assertEqual(result.result().result.notice,0x27)
         finally:client.destroy()
 
-    def test_unified_stream_and_telemetry_absence_do_not_gate_motion(self):
+    def test_odom_absence_does_not_gate_motion(self):
         from geometry_msgs.msg import Twist
-        node = self.make_bridge(enable_cmd_vel=True)
-        port = self.ports[-1]
-        node.on_command(Twist())  # No telemetry has arrived.
+        node=self.make_bridge(enable_cmd_vel=True)
+        port=self.ports[-1]
+        node.on_command(Twist())
         self.assertEqual(Parser().feed(port.tx[-1])[0].payload, bytes(12))
-        port.inject(odom_packet())
-        port.inject(odom_packet())
-        node.tick()
-        self.assertEqual(node.telemetry.streams['odom'].ok, 2)
-        self.assertEqual(node.last_published[0], 'odom')
-        node.telemetry.streams['odom'].last_rx = time.monotonic()-1.5
-        port.inject(odom_packet())
-        node.tick()
-        self.assertEqual(node.last_published[0], 'odom')
-        node.last_rx = time.monotonic()-10
-        node.tick()
+        port.inject(odom_packet()); node.tick()
+        self.assertEqual(set(node.telemetry.streams), {'odom'})
+        self.assertEqual(node.telemetry.streams['odom'].ok,1)
+        self.assertEqual(node.last_published[0],'odom')
+        node.telemetry.streams['odom'].last_rx=time.monotonic()-1.5
+        node.tick(); self.assertIsNone(node.last_published)
+        port.inject(odom_packet()); node.tick()
+        self.assertEqual(node.last_published[0],'odom')
+        node.last_rx=time.monotonic()-10; node.tick()
         self.assertIsNotNone(node.port)

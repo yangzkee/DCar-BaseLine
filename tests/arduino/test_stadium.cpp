@@ -21,16 +21,16 @@ static void inject(const std::vector<uint8_t> &f) { Serial.testRx.insert(Serial.
 int main() {
     setup();
     assert(nowMs >= 4570 && !DFCom.state.received); // No telemetry/state gate.
-    // Corrupt length before bytewise Odom + VelPos; both genuine streams recover.
+    // Corrupt length before bytewise Odom; parser recovers.
     inject({0xDF,0x97,1,0x6C,0x80,60});
     for (auto b:telemetry(0x80,51,4)) { inject({b}); DFCom.update(); }
     for (auto b:telemetry(0x81,35,2)) { inject({b}); DFCom.update(); }
-    assert(DFCom.odom.frameCount==1 && DFCom.velpos.frameCount==1);
-    inject(telemetry(0x81,1,4)); DFCom.update();
-    assert(DFCom.velposDiag.wire==2 && DFCom.velposDiag.rejected==1);
-    assert(DFCom.odomAvailable() && DFCom.velposAvailable());
+    assert(DFCom.odom.frameCount==1);
+    inject(telemetry(0x80,1,4)); DFCom.update();
+    assert(DFCom.odomDiag.wire==2 && DFCom.odomDiag.rejected==1);
+    assert(DFCom.odomAvailable());
     nowMs+=2000;
-    assert(!DFCom.odomAvailable() && !DFCom.velposAvailable());
+    assert(!DFCom.odomAvailable());
     Serial.testClear(); Serial.testAutoComplete=true;
     for (unsigned n=0;n<3;n++) loop();
     assert(completedLaps==3 && !testStopped);
@@ -45,5 +45,5 @@ int main() {
     Serial.testFailCommand=0x66; loop();
     assert(testStopped && completedLaps==3);
     size_t before=Serial.testTx.size(); loop(); assert(before==Serial.testTx.size());
-    puts("Arduino dual telemetry, resync, independent motion, three stadium laps and failure stop passed");
+    puts("Arduino Odom telemetry, resync, independent motion, three stadium laps and failure stop passed");
 }

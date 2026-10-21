@@ -82,7 +82,7 @@ ros2 topic echo /odom --once
 ros2 topic hz /odom
 ```
 
-默认独立订阅Odom和VelPos，分别发布 `/telemetry/odom`、`/telemetry/velpos` 和 `/telemetry/status`；本通用桥接入口只读，不自动发路线。VelPos不提供IMU角速度。
+默认只订阅 Odom，发布 `/telemetry/odom`、`/odom` 和 `/telemetry/status`；Pro可配置 `publish_imu: true` 发布 `/imu/data`；本通用桥接入口只读，不自动发路线。
 
 ## 5. 持续操场测试
 
@@ -99,10 +99,9 @@ ros2 launch dcaron_bridge stadium_test.launch.py port:=COM5
 ```bat
 ros2 topic echo /telemetry/status
 ros2 topic hz /telemetry/odom
-ros2 topic hz /telemetry/velpos
 ```
 
-两类wire/ok均持续增长才能通过双流验收，reject不增加。Odom缺失时VelPos可单独工作，不需切换模式。
+Odom wire/ok持续增长、reject不增加。断更1秒后不发布旧数据，恢复有效 Odom 后自动继续发布。
 运动与遥测/状态独立；实际串口故障、队列握手/ACK/DONE失败和任务超时仍会使测试失败。路线及字段见[动作说明](motion.md)，物理验收见[根README](../../README.md#验收标准)。
 
 ## 6. 排查
@@ -114,7 +113,7 @@ ros2 topic hz /telemetry/velpos
 | GBK解码错误 | 构建前设置UTF-8变量及65001代码页 |
 | C++编译器缺失 | 安装VS C++工具链，从x64 Native Tools终端构建 |
 | 串口拒绝访问 | 同一COM只能有一个持有进程 |
-| 有串口但无odom | 检查COM、波特率、TX/RX/GND、供电和VelPos支持 |
+| 有串口但无odom | 检查COM、波特率、TX/RX/GND、供电和Odom格式 |
 | Goal被拒绝 | 查看桥接日志中的参数、profile、遥测或占用原因 |
 | 队列查询超时 | 先确认车端v6支持，再排查链路；不盲目重发运动 |
 | 更新后行为没变 | 重编译、新终端重新加载安装环境，重启桥接 |

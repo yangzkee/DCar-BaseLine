@@ -1,4 +1,4 @@
-"""Independent real Odom reception, diagnostics and freshness selection."""
+"""Odom reception, diagnostics and freshness checks."""
 from dataclasses import dataclass
 
 from .protocol import STREAMS, decode
@@ -43,7 +43,4 @@ class TelemetryReceiver:
         return name
 
     def preferred(self, now):
-        for name in ('odom',):
-            if self.streams[name].fresh(now):
-                return name
-        return None
+        return 'odom' if self.streams['odom'].fresh(now) else None

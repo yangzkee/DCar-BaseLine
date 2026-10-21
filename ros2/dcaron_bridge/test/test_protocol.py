@@ -16,13 +16,6 @@ def odom_packet():
     return Frame(151, 1, 0x6C, 0x80, payload)
 
 
-def velpos_packet():
-    payload = b'\x02' + struct.pack('<7h3i2I',
-        -10000, 500, -1000, 1500, 2000, -2500, 3000,
-        123456, -234567, 345678, 1234, 567)
-    return Frame(151, 1, 0x6C, 0x81, payload)
-
-
 class ProtocolTests(unittest.TestCase):
     def test_published_manual_golden_frame(self):
         self.assertEqual(frame(4, 0x6A, bytes((1, 10))),
@@ -44,7 +37,7 @@ class ProtocolTests(unittest.TestCase):
                 velocity(bad, 0, 0)
 
     def test_noise_corruption_fragmentation_and_coalescing(self):
-        good = frame(0x6C, 0x81, velpos_packet().payload, 151, 1)
+        good = frame(0x6C, 0x80, odom_packet().payload, 151, 1)
         corrupted = bytearray(good)
         corrupted[-1] ^= 0x80
         parser = Parser()
@@ -55,7 +48,7 @@ class ProtocolTests(unittest.TestCase):
             size = rng.randint(1, 12)
             packets.extend(parser.feed(stream[:size]))
             stream = stream[size:]
-        self.assertEqual(packets, [velpos_packet(), velpos_packet()])
+        self.assertEqual(packets, [odom_packet(), odom_packet()])
         self.assertEqual(len(parser.buffer), 0)
 
     def test_payload_with_frame_markers_and_max_length(self):
@@ -80,11 +73,11 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(state.position, (123.456, -234.567, 345.678))
         self.assertEqual(state.device_time, (1234, 567))
 
-    def test_removed_velpos_rejected(self):
+    def test_unsupported_telemetry_rejected(self):
         with self.assertRaises(ValueError):
-            decode(velpos_packet())
+            decode(Frame(151, 1, 0x6C, 0x81, bytes(35)))
         with self.assertRaises(ValueError):
-            subscribe('velpos', 10)
+            subscribe('unknown')
 
     def test_wrong_versions_lengths_and_classes_rejected(self):
         original = odom_packet()

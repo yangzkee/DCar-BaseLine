@@ -4,7 +4,7 @@
  * 烧录后自动测试：上电等待及遥测观察后等待3秒，持续循环操场路线，无模式开关。
  * 每圈：倒行半圆 -> 后退 -> 倒行半圆 -> 后退同时旋转360度。
  * 需要全向/麦克纳姆底盘。正常完成立即开始下一圈，失败停止，不把失败当通过。
- * 订阅统一Odom；遥测/状态诊断仅报告，不作为运动启动条件。
+ * 只订阅Odom；遥测/状态诊断仅报告，不作为运动启动条件。
  *
  * 所有 DFQueue_* 入参固定为米、弧度、m/s、rad/s。
  * 0.10f 表示 10cm，PI/2 表示 90 度；不使用 g_dfcom_unit_mode。
@@ -26,7 +26,6 @@
 #define DEMO_START_DELAY_MS  3000
 #define DEMO_WAIT_MS         60000
 /* 独立开关，关闭回传或日志不会关闭运动；不重复订阅，避免重置车端推流。 */
-#define DEMO_SUBSCRIBE_ODOM   1
 #define DEMO_QUERY_STATE      1
 #define DEMO_LOG_ENABLE       1
 
@@ -56,12 +55,11 @@ static void Demo_Delay(u32 ms)
 /* 诊断是观察窗口，不根据状态或任一遥测的有无决定是否发运动任务。 */
 static void Startup_Diagnose(void)
 {
-    printf("\r\n[DCar] STM32 client 0.4.1 / circular RX / independent telemetry / queue v6\r\n");
+    printf("\r\n[DCar] STM32 client 0.4.1 / circular RX / Odom telemetry / queue v6\r\n");
     printf("[INIT] car=USART1 460800; terminal=USART2 115200\r\n");
     printf("[INIT] queue units=m, rad, m/s, rad/s\r\n");
-    if (DEMO_SUBSCRIBE_ODOM)
-        Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
-    Demo_Delay(20);  /* 保留两条订阅之间的间隔。 */
+    Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
+    Demo_Delay(20);  /* 保留Odom订阅与状态查询之间的间隔。 */
     g_dcar_state.received = 0;
     if (DEMO_QUERY_STATE) Cmd_Query_DcarState();
     Demo_Delay(500); /* 固定观察窗口，无遥测时也不会无限等待。 */

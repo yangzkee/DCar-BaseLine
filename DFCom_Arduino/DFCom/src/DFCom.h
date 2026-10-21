@@ -63,18 +63,6 @@ struct DFOdom {
     uint8_t  fresh;
 };
 
-/* 简化里程计 (DF_vel_pose) */
-struct DFVelPos {
-    float yaw;
-    float bVelX, bVelY, bVelZ;
-    float nVelX, nVelY, nVelZ;
-    float posX, posY, posZ;
-    uint32_t carTimeS, carTimeUs;
-    uint32_t frameCount;
-    uint32_t localTickMs;
-    uint8_t  fresh;
-};
-
 /* 小车激活/校准状态 */
 struct DFState {
     uint8_t received;        /* 1 = 收到过回传 (链路活) */
@@ -115,7 +103,6 @@ public:
 
     /* ---- 里程计订阅 / 状态查询 ---- */
     void subscribeOdom(uint16_t freqHz = 10, uint8_t mode = DFCOM_MODE_CONTINUOUS);
-    void subscribeVelPos(uint16_t freqHz = 10, uint8_t mode = DFCOM_MODE_CONTINUOUS);
     void queryState();
 
     /* ---- 必须在 loop() 里(或 waitDone 内部)调, 收+解析回传 ---- */
@@ -132,12 +119,10 @@ public:
 
     /* ---- 数据 (SI 原生, 直接读) ---- */
     DFOdom   odom;
-    DFVelPos velpos;
     DFState  state;
-    DFStreamDiag odomDiag, velposDiag;
+    DFStreamDiag odomDiag;
     uint32_t rxBytes = 0;
     bool odomAvailable() const { return odom.frameCount && (uint32_t)(millis()-odom.localTickMs)<1000; }
-    bool velposAvailable() const { return velpos.frameCount && (uint32_t)(millis()-velpos.localTickMs)<1000; }
     void serviceDelay(uint32_t ms); /* 延时期间持续收帧；日志/状态不阻塞运动。 */
 
     /* ---- 友好取值 (换成 cm / 度) ---- */
@@ -167,7 +152,7 @@ private:
     uint8_t _sendFailed = 0;
     uint8_t _failedCmd = 0;
 
-    /* 有界字节流缓存；保留残帧，扫描后续有效帧，支持双遥测粘连。 */
+    /* 有界字节流缓存；保留残帧，扫描后续有效帧，支持遥测与任务回包粘连。 */
     uint8_t _buf[72];
     uint8_t _idx = 0;
 

@@ -24,7 +24,6 @@ void delay_ms(u32 ms) {
     if (canceled) longjmp(finished,1);
     g_local_tick_ms += ms;
 }
-
 void Cmd_Subscribe_Odom(u8 mode,u16 hz) {
     assert(mode==ODOM_MODE_CONTINUOUS && hz==ODOM_FREQ_10HZ); odom_subs++;
     if (strcmp(scenario,"with-odom")==0 || strcmp(scenario,"odom-only")==0) g_odom.frame_count++;

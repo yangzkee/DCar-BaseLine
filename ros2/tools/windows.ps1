@@ -1,7 +1,6 @@
 param(
     [ValidateSet('check', 'build', 'test', 'run')][string]$Action = 'check',
     [string]$Port = 'COM3',
-    [ValidateSet('velpos', 'odom')][string]$Telemetry = 'velpos',
     [switch]$EnableMotion,
     [switch]$EnableActions
 )
@@ -40,7 +39,7 @@ try {
             . ./install/local_setup.ps1
             $motionValue = if ($EnableMotion) { 'true' } else { 'false' }
             $actionValue = if ($EnableActions) { 'true' } else { 'false' }
-            ros2 launch dcaron_bridge bridge.launch.py "port:=$Port" "telemetry:=$Telemetry" "enable_cmd_vel:=$motionValue" "enable_motion_actions:=$actionValue"
+            ros2 launch dcaron_bridge bridge.launch.py "port:=$Port" "enable_cmd_vel:=$motionValue" "enable_motion_actions:=$actionValue"
             if ($LASTEXITCODE -ne 0) { throw 'ROS node exited with an error' }
         }
     }

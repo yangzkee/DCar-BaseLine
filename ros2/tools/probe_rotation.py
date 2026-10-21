@@ -56,7 +56,7 @@ def main():
                     if packet.target != 151 or packet.source != 1:
                         continue
                     fields = dict(a=hex(packet.a), b=hex(packet.b), payload=packet.payload.hex(' '))
-                    if packet.a == 0x6C and packet.b == 0x81:
+                    if packet.a == 0x6C and packet.b == 0x80:
                         state = decode(packet)
                         after = state
                         fields.update(yaw_deg=math.degrees(state.rpy[2]), position_m=state.position,
@@ -68,12 +68,12 @@ def main():
 
             try:
                 log('connected', port=options.port, baudrate=460800)
-                send(subscribe('velpos'), 'continuous telemetry 10Hz')
+                send(subscribe('odom'), 'continuous telemetry 10Hz')
                 deadline = time.monotonic() + 2
                 while after is None and time.monotonic() < deadline:
                     list(receive())
                 if after is None:
-                    raise RuntimeError('No valid VelPos v2 received; motion NOT sent')
+                    raise RuntimeError('No valid Odom v4 received; motion NOT sent')
                 before = after
                 if options.degrees:
                     queue = QueueClient([
@@ -110,7 +110,7 @@ def main():
                         cleanup_ok = False
                         log('stop_failed', message=str(exc))
                 try:
-                    send(subscribe('velpos', continuous=False), 'stop continuous subscription')
+                    send(subscribe('odom', continuous=False), 'stop continuous subscription')
                 except (OSError, serial.SerialException) as exc:
                     cleanup_ok = False
                     log('unsubscribe_failed', message=str(exc))

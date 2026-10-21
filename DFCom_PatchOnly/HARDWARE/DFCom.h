@@ -47,7 +47,18 @@
 #define ODOM_FREQ_250HZ      250
 #define ODOM_FREQ_500HZ      500
 
-
+/* ===========================================================================
+ * 2. 接收到的 ODOM 数据（应用直接读 g_odom）
+ *
+ *  ★ 坐标系（ROS REP-103）★
+ *    g_odom.n_pos_x_m  = 世界系 +X 方向位移（开机起累计），+X = 前进方向
+ *    g_odom.n_pos_y_m  = 世界系 +Y 方向位移（开机起累计），+Y = 左方
+ *    g_odom.b_vel_x_mps = 车体系 Vx（前进为正）
+ *    g_odom.b_vel_y_mps = 车体系 Vy（左方为正）
+ *    g_odom.yaw_rad    = 当前航向角，单位弧度 (rad)，CCW（逆时针）为正，范围 [-pi, pi]
+ *      ↑ Odom yaw 回传 SI rad（s16/10000），与发送层一致。
+ *      ↑ 想看度数：DFCOM_RAD2DEG(g_odom.yaw_rad) 或 *57.29578f
+ * ===========================================================================*/
 
 /* rad → deg 转换辅助宏（学生看不懂弧度时用一下） */
 #define DFCOM_RAD2DEG(rad) ((rad) * 57.29578f)
@@ -102,10 +113,6 @@ typedef struct {
 
 extern volatile OdomData_t g_odom;
 
-
-
-
-
 /* ===========================================================================
  * 3. 运动状态（应用通常不用直接读，给 WaitMoveDone 内部用）
  * ===========================================================================*/
@@ -142,7 +149,21 @@ typedef struct {
 
 extern volatile DcarState_t g_dcar_state;
 
-
+/* ===========================================================================
+ * 无任务ID Cmd_Move_* 的单位模式 (g_dfcom_unit_mode)，不影响队列v6
+ * ---------------------------------------------------------------------------
+ * 默认: DFCOM_UNIT_CM (厘米 + 度, 学生友好)
+ *
+ * 调用 Cmd_Move_* 时入参的单位会根据这个全局变量自动转换:
+ *   - 模式 = MM:       入参为 毫米 / 毫米每秒 / 度 / 度每秒 (精度高, 适合机械臂/精确定位)
+ *   - 模式 = CM (默认): 入参为 厘米 / 厘米每秒 / 度 / 度每秒 (适合教学/普通场景)
+ *   - 模式 = M:         入参为 米   / 米每秒    / 弧度 / 弧度每秒 (协议原生 SI)
+ *
+ * 内部转换后, 协议层永远是 SI (米 + rad), 小车端不需要知道这件事。
+ *
+ * 接收侧 g_odom 字段不受这个开关影响, 永远是 SI 原生
+ * (想看 cm/mm/deg, 自己 *100 / *1000 / DFCOM_RAD2DEG() 转一下)。
+ * ===========================================================================*/
 typedef enum {
     DFCOM_UNIT_CM = 0,   /* ★ 默认: 厘米 + 度 (适合学生 / 初学者) */
     DFCOM_UNIT_M  = 1,   /* 米 + 弧度 (SI, 协议原生, 数值更小) */
@@ -197,7 +218,11 @@ void Cmd_Move_Rot           (float dyaw_rad, float omega_max_rad_s);            
 void Cmd_Move_Vel           (float vx_mps, float vy_mps, float vz_rad_s);           /* 0x62 持续速度（无完成回传） */
 void Cmd_Move_Arc           (float radius_m, float dyaw_rad, float speed_mps, u8 profile);      /* 0x66 圆弧 */
 
-
+/* ODOM 订阅：发一次小车就持续发送
+ *   mode: ODOM_MODE_CONTINUOUS / ODOM_MODE_ONESHOT / ODOM_MODE_STOP
+ *   freq_hz: 10/50/100/200/250/500（小车协议枚举，其他自动 fallback 到 10）
+ * 教学常用：Cmd_Subscribe_Odom(ODOM_MODE_CONTINUOUS, ODOM_FREQ_10HZ);
+ */
 void Cmd_Subscribe_Odom   (u8 mode, u16 freq_hz);
 
 /* 查询小车激活/校准状态（启动诊断用）
@@ -249,7 +274,6 @@ extern volatile DFComRxDiag_t g_dfcom_rx_diag;
 
 /* TIM2只维护tick；主循环和等待循环调用Poll，日志开关不影响收帧/计时/运动。 */
 extern volatile u8 g_print_odom_enable; /* 日志总开关，不影响收帧或运动。 */
-extern volatile u8 g_print_full_odom_enable;
 void DFCom_Poll(void);
 /* ---- Print（DFCom_Print.c）：仅在主循环调用 ---- */
 void Odom_Print(void);              /* Odom v4 全量版，收到新鲜回传时自动打印 */
