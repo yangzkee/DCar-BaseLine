@@ -8,7 +8,7 @@
 本目录不提供含缺失依赖的Keil工程文件。`USER/main.c`是集成示例；需要由你的工程提供启动文件、STM32标准库、时钟和系统辅助代码。
 当前运动示例使用队列v6，所有 `DFQueue_*` 参数固定为米、弧度、m/s、rad/s。
 
-统一 Odom 使用 `A=0x6C/B=0x80`、51字节、格式号4。Pro提供完整数据；Std的roll/pitch、三轴加速度和三轴角速度为零占位，不能当成真实IMU测量；Mini/SE不开放里程计。
+统一订阅 Odom，车端按 DCar 型号自动提供相应数据，用户无需选择 Odom 模式。专业版（Pro）提供全量 Odom；非专业版提供普通 Odom，包含航向、车体系/固定里程计系速度、位置和时间戳。普通 Odom 的 roll/pitch、三轴加速度、三轴角速度为零占位，不代表真实 IMU 测量。专业版还提供 roll/pitch、三轴加速度和三轴角速度；两类数据逐项对照见[Odom数据说明](../README.md#odom-data)。
 
 ## 目录
 
@@ -64,3 +64,5 @@ API与状态字段见 [DFCom.h](HARDWARE/DFCom.h)，详细单位和报文见 [DF
 日志总开关不影响接收，USART2日志需非阻塞发送，移植时避免在接收/计时中断printf。
 只保存和统计 Odom，未收到首帧或超过1秒未更新则报告缺失；收到有效新帧后恢复。
 驱动调度、全部计数与日志说明见[完整工程](../DFCom_Example/README.md#收帧日志与独立功能)，逐段及Odom验收见[根README](../README.md#验收标准)。
+
+<sub>老版本的 VelPos 已与 Odom 合并，会根据你手上的 DCar 版本自动调整到最合适的 Odom 版本。</sub>

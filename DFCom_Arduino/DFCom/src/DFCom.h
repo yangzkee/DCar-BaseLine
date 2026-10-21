@@ -49,7 +49,10 @@
 #define DFCOM_RAD2DEG(r) ((r) * 57.29578f)
 #define DFCOM_DEG2RAD(d) ((d) * 0.01745329f)
 
-/* 里程计数据 (全量 DF_odom, SI 原生单位: m / m/s / rad / rad/s) */
+/* 统一Odom，车端按DCar型号提供普通/全量字段，应用无需切换订阅。
+ * Pro：rpy、acc、gyro、车体系/固定里程计系速度、位置与时间戳。
+ * 普通款：yaw、两系速度、位置与时间；roll/pitch/acc/gyro为零占位。
+ * SI原生单位：m、m/s、rad、rad/s；零占位不代表真实IMU测量。 */
 struct DFOdom {
     float roll, pitch, yaw;          /* rad, yaw CCW+ */
     float accX, accY, accZ;          /* m/s² */

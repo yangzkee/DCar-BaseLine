@@ -246,6 +246,8 @@ class DcaronBridge(Node):
             for index in (21, 28, 35):
                 odom.twist.covariance[index] = 0.1
         (publisher if publisher is not None else self.odom_pub).publish(odom)
+        # Pro provides real IMU fields; ordinary Odom has zero placeholders.
+        # Publishing IMU is opt-in and does not select an Odom wire mode.
         if publish_imu and self.imu_pub is not None and state.gyro is not None:
             imu = Imu()
             imu.header.stamp = stamp

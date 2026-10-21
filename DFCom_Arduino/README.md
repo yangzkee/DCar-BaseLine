@@ -6,7 +6,7 @@
 
 目标ATmega328P。使用无任务ID的逐条运动接口，未实现队列v6；接收数据使用SI，与STM32 / ROS方向一致。
 
-统一 Odom 使用 `A=0x6C/B=0x80`、51字节、格式号4。Pro提供完整数据；Std的roll/pitch、三轴加速度和三轴角速度为零占位，不能当成真实IMU测量；Mini/SE不开放里程计。
+统一订阅 Odom，车端按 DCar 型号自动提供相应数据，用户无需选择 Odom 模式。专业版（Pro）提供全量 Odom；非专业版提供普通 Odom，包含航向、车体系/固定里程计系速度、位置和时间戳。普通 Odom 的 roll/pitch、三轴加速度、三轴角速度为零占位，不代表真实 IMU 测量。专业版还提供 roll/pitch、三轴加速度和三轴角速度；两类数据逐项对照见[Odom数据说明](../README.md#odom-data)。
 
 ## 目录
 
@@ -69,9 +69,9 @@ profile=0匀速、1梯形、2距离闭环，不能填队列档位16..20。`waitD
 
 ## 独立接收与诊断
 
-只订阅 Odom，统一读取姿态、IMU、速度与位置：
+只订阅 Odom；专业版读取全量数据，普通款读取航向、速度与位置：
 
-- `DFCom.odom`：全量姿态、IMU、速度、位置、`frameCount/localTickMs/fresh`。
+- `DFCom.odom`：统一 Odom 数据结构，专业版包含完整姿态和 IMU，普通款增强字段为零占位；同时保存 `frameCount/localTickMs/fresh`。
 - `DFCom.odomDiag`：`wire`外层校验通过帧、`rejected`长度/版本不符、`len/version`最近负载格式；对应数据的frameCount为成功解析数。
 - `DFCom.rxBytes`：主循环已取出的串口字节数；它不包含AVR硬件/核心接收环可能丢失的字节，不可当作线端无丢包证明。
 - `DFCom.state.received/imuCalibrated`：状态回包 / 校准位，只报告。
@@ -85,3 +85,5 @@ profile=0匀速、1梯形、2距离闭环，不能填队列档位16..20。`waitD
 按[根README四段验收表](../README.md#验收标准)检查动作、完成结果及多圈漂移。Odom wire与frameCount持续增长，rejected保持0；断更后available为false，新帧到达后恢复。
 两版业务同样检查逐段waitDone、失败停止后续任务和completedLaps增长。结果需结合外部测量，不承诺统一距离 / 角度精度。
 仓库根目录 `python3 tests/run_checks.py` 包含主机回归；CI另编译两个Uno完整目标并报告Flash/RAM。真实AVR收帧稳定性与实车运动须在对应板卡验证，主机模拟不代替硬件验收。
+
+<sub>老版本的 VelPos 已与 Odom 合并，会根据你手上的 DCar 版本自动调整到最合适的 Odom 版本。</sub>

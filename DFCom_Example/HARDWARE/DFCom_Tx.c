@@ -316,7 +316,8 @@ void Cmd_Move_Arc(float radius_m, float dyaw_rad, float speed_mps, u8 profile)
  *  ──────────────────────────────────────────────────────────────────────────
  *  Class/Cmd: A = 0x04 (DataRecivViitClass), B = 0x80 (Time_V)
  *
- *  含义：订阅 IMU_TIME 数据包（含 Yaw + 里程计 + IMU 原始）。
+ *  含义：统一订阅Odom，由车端按型号提供普通/全量数据。
+ *  Pro提供姿态、IMU、两系速度、位置与时间；普通款提供yaw、两系速度、位置与时间。
  *
  *  ★ 这条指令的协议层格式未变（订阅机制本身不动），但回传里的 N_PosX/Y
  *    现在的含义是 ROS 坐标系：+X 前进、+Y 左方 ★

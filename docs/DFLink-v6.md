@@ -169,7 +169,7 @@ STM32返回1成功、2超时/未知ID/零时限、3设备故障；用 `DFQueue_L
 mode=1连续、2单次。客户端“停止订阅”编码为单次模式，使连续推送结束；不是单独的停止确认。
 freq_code为Hz/10：10→1、50→5、100→10、200→20、250→25、500→50；ROS还支持1000→100。STM32其他输入回落为10Hz。
 
-统一 Odom 使用 `A=0x6C/B=0x80`、51字节、格式号4。Pro提供完整数据；Std的roll/pitch、三轴加速度和三轴角速度为零占位，不能当成真实IMU测量；Mini/SE不开放里程计。 ROS通过 `publish_imu` 控制IMU发布，默认false。
+统一订阅 Odom，车端按 DCar 型号自动提供相应数据，用户无需选择 Odom 模式。专业版（Pro）提供全量 Odom；非专业版提供普通 Odom，包含航向、车体系/固定里程计系速度、位置和时间戳。普通 Odom 的 roll/pitch、三轴加速度、三轴角速度为零占位，不代表真实 IMU 测量。ROS通过 `publish_imu` 控制IMU发布，默认false。
 
 Odom回包A=0x6C/B=0x80、LEN=51、首字节version=4：
 

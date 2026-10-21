@@ -6,7 +6,7 @@
 
 外部控制板程序，使用 DFLink 队列 v6。打开 [USER/Template.uvprojx](USER/Template.uvprojx)，实际运动直接看 [USER/main.c](USER/main.c)。
 
-统一 Odom 使用 `A=0x6C/B=0x80`、51字节、格式号4。Pro提供完整数据；Std的roll/pitch、三轴加速度和三轴角速度为零占位，不能当成真实IMU测量；Mini/SE不开放里程计。
+统一订阅 Odom，车端按 DCar 型号自动提供相应数据，用户无需选择 Odom 模式。专业版（Pro）提供全量 Odom；非专业版提供普通 Odom，包含航向、车体系/固定里程计系速度、位置和时间戳。普通 Odom 的 roll/pitch、三轴加速度、三轴角速度为零占位，不代表真实 IMU 测量。专业版还提供 roll/pitch、三轴加速度和三轴角速度；两类数据逐项对照见[Odom数据说明](../README.md#odom-data)。
 
 ## 目录
 
@@ -61,3 +61,5 @@ main固定订阅 Odom，并查询状态和输出日志。遥测/状态仅报告�
 `wire`增长但`ok`不增长时查看负载长度 / 版本；`wire=0`表示未收到该类型有效帧。
 接收服务超过缓冲可覆盖的时间未运行时，驱动记录溢出、丢弃残帧并从完整有效帧重新同步。1024字节约容纳22ms满速流量，业务必须按默认频率服务Poll。
 任务DONE不代替实车轨迹精度验收；遥测新鲜度提示不是硬件停车保障，断线时不能确认取消 / 零速送达。
+
+<sub>老版本的 VelPos 已与 Odom 合并，会根据你手上的 DCar 版本自动调整到最合适的 Odom 版本。</sub>

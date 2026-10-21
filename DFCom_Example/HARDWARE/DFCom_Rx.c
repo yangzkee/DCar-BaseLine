@@ -229,7 +229,9 @@ void DFCom_MoveCommandSendFailed(u8 cmd_code)
 /*============================================================================
  *  解析 1：Odom v4 数据帧 (A=0x6C, B=0x80, 51B payload)
  *  ──────────────────────────────────────────────────────────────────────────
- *  全量状态: roll/pitch/yaw + acc + gyro + vel(body/world) + pos(world) + ts
+ *  统一布局: roll/pitch/yaw + acc + gyro + vel(body/world) + pos(world) + ts
+ *  Pro所有字段有效；普通款保留yaw/速度/位置/时间，roll/pitch/acc/gyro为零占位。
+ *  同一订阅由车端按型号适配；客户端按布局解码，不把零占位当真实IMU。
  *  小车端发起: DF_CoreState.c::DF_IMU_TIME
  *
  *    偏移      字段           类型     scale    含义

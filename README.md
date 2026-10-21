@@ -64,7 +64,7 @@ cd DCar-BaseLine
 | Arduino 硬件 Serial | D1 TX 经 5V→3.3V 转换 → 车 USART3 RX/PB11；D0 RX ← 车 TX/PB10；GND 共地，确认电平兼容 | 115200，8N1 |
 | 电脑 ROS | USB-TTL TX/RX 与车 DFLink 口交叉，GND 共地；直接连车，不经过示例 STM32 | 460800，8N1，3.3V TTL |
 
-操场末段需要边平移边旋转，要求全向 / 麦克纳姆底盘。STM32 / ROS 需要队列 v6 及带 ID 的完成回包；Arduino 需要无 ID 运动与完成回包。统一 Odom 使用 `A=0x6C/B=0x80`、51字节、格式号4。Pro提供完整数据；Std的roll/pitch、三轴加速度和三轴角速度为零占位，不能当成真实IMU测量；Mini/SE不开放里程计。 ROS默认不发布IMU，Pro需要时在配置中设置 `publish_imu: true`。
+操场末段需要边平移边旋转，要求全向 / 麦克纳姆底盘。STM32 / ROS 需要队列 v6 及带 ID 的完成回包；Arduino 需要无 ID 运动与完成回包。统一订阅 Odom，车端按 DCar 型号自动提供相应数据，用户无需选择 Odom 模式。专业版（Pro）提供全量 Odom；非专业版提供普通 Odom，包含航向、车体系/固定里程计系速度、位置和时间戳。普通 Odom 的 roll/pitch、三轴加速度、三轴角速度为零占位，不代表真实 IMU 测量。ROS默认不发布IMU，Pro需要时在配置中设置 `publish_imu: true`。
 本仓库不提供可保证兼容的车端烧录包；队列能力由握手确认，遥测能力由实际回传格式确认。
 
 <a id="stm32测试"></a>
@@ -119,7 +119,26 @@ STM32 的无 ID `Cmd_Move_*` 及 `WaitMoveDone` 用于独立场景，不能夹�
 ### 数据与新鲜度
 
 STM32 `n_pos_x_m/n_pos_y_m` 是开机累计世界系位置；`b_vel_x_mps/b_vel_y_mps` 是随车头旋转的车体系速度，`yaw_rad` 为弧度。日志位置米、速度 m/s、Yaw 转为度。Arduino 的 `posX/posY`、`bVelX/bVelY`、`yaw` 同样始终存 SI，不随发送单位切换。
-Odom 包含 roll/pitch/yaw、加速度、陀螺仪、车体系/固定里程计系速度和固定里程计系位置。
+
+<a id="odom-data"></a>
+### 专业版全量 Odom 与普通 Odom
+
+所有例程使用相同的 Odom 订阅和接收接口；数据能力由车端固件按 DCar 型号提供，不需选择另一种协议或切换模式。两类采用同一帧布局，区别在字段的有效内容，不能根据零值自动推断车辆型号。
+
+| 数据 | 专业版：全量 Odom | 非专业版：普通 Odom | 单位 |
+|---|---|---|---|
+| 航向 yaw | 有效 | 有效 | rad，逆时针为正 |
+| 横滚 roll、俯仰 pitch | 有效 | 零占位 | rad |
+| 车体系速度 vx、vy、vz | 有效 | 有效 | m/s |
+| 固定里程计系速度 vx、vy、vz | 有效 | 有效 | m/s |
+| 固定里程计系位置 x、y、z | 有效 | 有效 | m |
+| 三轴加速度 ax、ay、az | 有效 | 零占位 | m/s² |
+| 三轴角速度 wx、wy、wz | 有效 | 零占位 | rad/s |
+| 车端时间戳 timestamp_ms、timestamp_us | 提供 | 提供 | 两个原始 U32 字段 |
+
+平面底盘的 z 位置/速度等字段可以为零；全量字段有效也不代表它们必须非零。普通 Odom 的增强字段占位不能用于判断车辆静止或计算 IMU 测量。ROS默认不发布 `/imu/data`；专业版需要独立IMU话题时配置 `publish_imu: true`，这不影响 Odom 的自动适配。ROS标准话题输出的位置和车体速度等字段见 [ROS说明](ros2/README.md#Odom遥测与话题)，完整线上字段见 [协议说明](docs/DFLink-v6.md#5-持续速度状态查询与遥测)。
+
+### Odom 更新与断更
 
 所有平台只保存 Odom 数据、计数和时间。最近 1 秒内更新视为新鲜；缺首帧或断更超过 1 秒则报告缺失，不把旧值或零值当成新回传。运动仍按自身协议处理。
 STM32 定时器只计时，Poll 约每 100ms 在主循环打印；Odom 不新鲜时打印 `[ODOM] NO FRESH DATA`。日志开关不影响收帧 / 计时 / 运动。
@@ -203,7 +222,7 @@ Yaw 在 ±π 回绕，不能只看第 4 段起终点 yaw 相同就判“转满�
 |---|---|
 | 构建与启动 | 编译无错误、上传成功；日志 / 运行变量对应当前程序 |
 | 运动协议 | STM32 每个 ID 的 Wait=DONE；ROS 最终 success=true；Arduino 每次 waitDone=true；入队 ACK / goal accepted 不算完成 |
-| Odom 遥测 | wire 和 ok 持续增长，格式正确，reject 不增长；姿态、速度、位置和 IMU 均来自有效 Odom |
+| Odom 遥测 | wire 和 ok 持续增长，格式正确，reject 不增长；航向、速度、位置来自有效 Odom；专业版另验收 roll/pitch、加速度和角速度 |
 | 接收稳定性 | STM32 dropped / overflows / errors 保持 0；Odom连续观察至少 60 秒，并多次复位检查 |
 | Odom 断更与恢复 | 断更 1 秒后不输出旧值；新有效帧到达后自动恢复；断更期间不能判遥测验收通过 |
 | 独立性 | 无状态 / 无遥测时不因观察窗口卡住；运动仍由握手 / ACK / DONE 与超时判定；关闭日志仍收帧 |
@@ -273,3 +292,5 @@ powershell -File tests/host/run_windows_tests.ps1 -Compiler C:\path\to\gcc.exe
 
 ROS 环境另执行 `colcon test --merge-install --packages-select dcaron_bridge` 和 `colcon test-result --verbose`。CI 包含主机回归、ROS Jazzy 实际构建 / 内存串口集成以及 Uno 两种完整例程编译；具体结果看对应提交的 Actions。
 主机模拟、目标编译和真实硬件测试分别验收。STM32 实测记录不能替代 ROS / Arduino 实车验证，也不能替代物理轨迹精度测量。
+
+<sub>老版本的 VelPos 已与 Odom 合并，会根据你手上的 DCar 版本自动调整到最合适的 Odom 版本。</sub>

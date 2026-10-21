@@ -55,7 +55,7 @@ Odom 数据独立解析和保存；状态与遥测缺失只报告，不拒绝运
 | `/cmd_vel` | geometry_msgs/Twist | 可选持续速度输入 |
 | `/tf` | TF | 可选odom→base_link，默认关闭 |
 
-统一 Odom 使用 `A=0x6C/B=0x80`、51字节、格式号4。Pro提供完整数据；Std的roll/pitch、三轴加速度和三轴角速度为零占位，不能当成真实IMU测量；Mini/SE不开放里程计。
+统一订阅 Odom，车端按 DCar 型号自动提供相应数据，用户无需选择 Odom 模式。专业版（Pro）提供全量 Odom；非专业版提供普通 Odom，包含航向、车体系/固定里程计系速度、位置和时间戳。普通 Odom 的 roll/pitch、三轴加速度、三轴角速度为零占位，不代表真实 IMU 测量。专业版还提供 roll/pitch、三轴加速度和三轴角速度；两类数据逐项对照见[Odom数据说明](../README.md#odom-data)。
 
 Odom wire和ok应持续增长，reject不增加。超过1秒未更新后 `/odom`、IMU与TF不再发布旧数据，收到有效新帧后自动恢复。
 Pro的Odometry角速度来自 Odom 陀螺仪；Std的零占位不代表实测静止。IMU orientation_covariance[0]=-1，不把混合姿态当测量姿态。
@@ -116,3 +116,5 @@ colcon test-result --verbose
 
 CI运行ROS Jazzy构建与内存串口集成，不代替实车验证。Windows环境、车辆与其他发行版按对应环境验收。
 Livox独立驱动接入见[说明](docs/livox.md)，本包不依赖雷达SDK。
+
+<sub>老版本的 VelPos 已与 Odom 合并，会根据你手上的 DCar 版本自动调整到最合适的 Odom 版本。</sub>

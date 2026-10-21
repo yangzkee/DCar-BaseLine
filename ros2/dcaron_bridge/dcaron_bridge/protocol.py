@@ -96,7 +96,12 @@ class Telemetry:
 
 
 def decode(packet):
-    """Decode exactly Odom v4; reject unknown layouts."""
+    """Decode the unified Odom layout; reject unknown layouts.
+
+    The device supplies full fields on Pro. Ordinary Odom supplies yaw,
+    body/world velocity, position and time; roll/pitch/acc/gyro are placeholders.
+    The same wire layout does not identify the model or IMU availability.
+    """
     p = packet.payload
     if packet.a != 0x6C:
         raise ValueError("Not a telemetry frame")

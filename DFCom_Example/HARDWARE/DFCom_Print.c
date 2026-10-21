@@ -76,7 +76,8 @@ void DFCom_Poll(void)
     }
 }
 
-/* Odom提供姿态、IMU、车体/固定里程计系速度与位置，SI单位。
+/* Odom统一提供航向、车体/固定里程计系速度、位置与时间，SI单位。
+ * Pro另有roll/pitch、加速度和角速度；普通款的这些字段是零占位。
  * N系为固定里程计坐标系，B系跟随车身；+X前、+Y左、+Z上。
  * 仅主循环打印；缺首帧或超过1秒未更新时报告缺失，不输出旧数值。 */
 void Odom_Print(void)
@@ -90,10 +91,10 @@ void Odom_Print(void)
     snap.n_pos_y_m    = g_odom.n_pos_y_m;
     snap.b_vel_x_mps  = g_odom.b_vel_x_mps;     /* B 系: 瞬时速度 */
     snap.b_vel_y_mps  = g_odom.b_vel_y_mps;
-    snap.acc_x_mps2   = g_odom.acc_x_mps2;      /* B 系: IMU 加速度 */
+    snap.acc_x_mps2   = g_odom.acc_x_mps2;      /* Pro B系加速度；普通款零占位。 */
     snap.acc_y_mps2   = g_odom.acc_y_mps2;
-    snap.acc_z_mps2   = g_odom.acc_z_mps2;      /* 静止平放 ≈ +9.81 */
-    snap.gyro_z_rps   = g_odom.gyro_z_rps;      /* B 系 Z 角速度 */
+    snap.acc_z_mps2   = g_odom.acc_z_mps2;      /* Pro静止平放约+9.81；普通款零占位。 */
+    snap.gyro_z_rps   = g_odom.gyro_z_rps;      /* Pro B系Z角速度；普通款零占位。 */
     snap.frame_count  = g_odom.frame_count;
 
     if (snap.frame_count == 0 || (u32)(g_local_tick_ms - g_odom.local_tick_ms) >= 1000) {

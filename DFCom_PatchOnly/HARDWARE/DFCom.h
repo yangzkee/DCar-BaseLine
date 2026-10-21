@@ -65,23 +65,26 @@
 #define DFCOM_DEG2RAD(deg) ((deg) * 0.01745329f)
 
 /* ===========================================================================
- * OdomData_t — 全量 Odom v4 数据 (高级用户, 含 IMU 姿态 + 原始数据)
+ * OdomData_t — 统一 Odom 数据；车端按型号提供普通或全量字段
  *   对应小车回传帧: CMD 0x6C 0x80, 51B payload, version=0x04
+ *   Pro全量：rpy、acc、gyro、两系速度、位置、时间戳。
+ *   普通款：yaw、两系速度、位置、时间戳；roll/pitch/acc/gyro为零占位。
+ *   接口不区分模式，不能通过零值推断型号或IMU有效性。
  *   坐标系: ROS REP-103 FLU (+X 前, +Y 左, +Z 上, CCW+ 逆时针)
  * ===========================================================================*/
 typedef struct {
-    /* 姿态 (rad) */
+    /* 姿态 (rad)：普通款仅yaw有效，roll/pitch为零占位。 */
     float roll_rad;         /* ROS roll */
     float pitch_rad;        /* ROS pitch */
     float yaw_rad;          /* ROS yaw (CCW+ 逆时针为正, wrap 到 [-pi, pi])
                              * 想看度数: DFCOM_RAD2DEG(g_odom.yaw_rad) */
 
-    /* 加速度 (m/s², body 系 specific force, 静止 acc_z ≈ +9.81) */
+    /* 加速度 (m/s², body 系 specific force, Pro静止 acc_z ≈ +9.81；普通款为零占位) */
     float acc_x_mps2;
     float acc_y_mps2;
     float acc_z_mps2;
 
-    /* 角速度 (rad/s, body 系) */
+    /* 角速度 (rad/s, body 系)：Pro有效，普通款为零占位。 */
     float gyro_x_rps;
     float gyro_y_rps;
     float gyro_z_rps;       /* +Z 轴角速度, CCW+ */
@@ -276,7 +279,7 @@ extern volatile DFComRxDiag_t g_dfcom_rx_diag;
 extern volatile u8 g_print_odom_enable; /* 日志总开关，不影响收帧或运动。 */
 void DFCom_Poll(void);
 /* ---- Print（DFCom_Print.c）：仅在主循环调用 ---- */
-void Odom_Print(void);              /* Odom v4 全量版，收到新鲜回传时自动打印 */
+void Odom_Print(void);              /* 统一Odom；按新鲜度打印，普通款增强字段为占位值。 */
 void Odom_PrintTimer_Init(void);    /* 启动1ms计时，打印由Poll调度 */
 
 
