@@ -23,15 +23,12 @@
 #include "delay.h"
 #include "DFCom.h"
 
-#define DEMO_SPEED_MPS       0.15f
-#define DEMO_GRADE           DF_ACCEL_MEDIUM
 #define DEMO_START_DELAY_MS  3000
 #define DEMO_WAIT_MS         60000
 /* 独立开关，关闭回传或日志不会关闭运动；不重复订阅，避免重置车端推流。 */
 #define DEMO_QUERY_STATE      1
 #define DEMO_LOG_ENABLE       1
 
-#define DEMO_PI              3.14159265358979323846f
 
 static void System_Init(void)
 {
@@ -87,9 +84,9 @@ int main(void)
      * 隔离此阶段的运动回包，避免带入正式任务；停车能否到达仍取决于链路。
      */
     DFCom_MoveSessionQuarantine();
-    Cmd_Move_Vel(0, 0, 0);
+    Cmd_Move_Vel(0, 0, 0); /* vx=0前后速度、vy=0左右速度、wz=0角速度：全部填0停车；本函数默认cm/s、度/s，正值前/左/逆时针，负值反向。 */
     Demo_Delay(1000);
-    Cmd_Move_Vel(0, 0, 0);
+    Cmd_Move_Vel(0, 0, 0); /* vx=0前后速度、vy=0左右速度、wz=0角速度：全部填0停车；本函数默认cm/s、度/s，正值前/左/逆时针，负值反向。 */
     Startup_Diagnose();
     Demo_Delay(50);
     DFCom_MoveSessionStart();
@@ -106,15 +103,18 @@ int main(void)
                (unsigned long)lap);
         stage = "submit";
         /* 四条任务按顺序连续入队；运动调用直接放在main内，便于修改和验收。
+         * 各行直接填写数值，单独修改一行不影响其他段；数值须符合车端能力。
+         * 角度用弧度：1.57079633约90度、3.14159265约180度、6.28318531约360度。
+         * grade为16极低、17低、18中、19高、20极高；不是直接填写m/s²。
          * 半径30cm、每段后退60cm；末段平移同时旋转，仅适用于全向底盘。
          */
-        ids[0] = DFQueue_Arc(0.30f, DEMO_PI, -DEMO_SPEED_MPS, DEMO_GRADE);
+        ids[0] = DFQueue_Arc(0.30f, 3.14159265f, -0.15f, 18); /* radius=0.30米须>0，增大使弧更宽；yaw=3.14159265弧度约+180°，正逆时针/负顺时针，绝对值越大转得越多；speed=-0.15米/秒须非0，负倒行/正前行，绝对值越大越快；grade=18中档，可填16/17/18/19/20，档位越高加减速越强，实际限值由车端决定。 */
         if (!ids[0]) goto failed;
-        ids[1] = DFQueue_Linear(-0.60f, 0, DEMO_SPEED_MPS, 0, DEMO_GRADE);
+        ids[1] = DFQueue_Linear(-0.60f, 0.0f, 0.15f, 0.0f, 18); /* x=-0.60米后退，正值前进，绝对值越大走得越远；y=0米不侧移，正左/负右；speed=0.15米/秒须>0，越大越快，后退改x为负而非改speed；yaw=0弧度不附加转向，正逆时针/负顺时针；grade=18中档，可填16/17/18/19/20，越高加减速越强。 */
         if (!ids[1]) goto failed;
-        ids[2] = DFQueue_Arc(0.30f, DEMO_PI, -DEMO_SPEED_MPS, DEMO_GRADE);
+        ids[2] = DFQueue_Arc(0.30f, 3.14159265f, -0.15f, 18); /* radius=0.30米须>0，越大弧越宽；yaw=3.14159265弧度约+180°，正逆时针/负顺时针，绝对值控制转角；speed=-0.15米/秒须非0，负倒行/正前行，绝对值控制快慢；grade=18中档，可填16/17/18/19/20，越高加减速越强；本行参数可独立于第一段调整。 */
         if (!ids[2]) goto failed;
-        ids[3] = DFQueue_Linear(-0.60f, 0, DEMO_SPEED_MPS, 2*DEMO_PI, DEMO_GRADE);
+        ids[3] = DFQueue_Linear(-0.60f, 0.0f, 0.15f, 6.28318531f, 18); /* x=-0.60米后退，正前/负后；y=0米不侧移，正左/负右，位移绝对值越大走得越远；speed=0.15米/秒须>0，越大越快；yaw=6.28318531弧度约+360°，边平移边逆时针转一圈，负值顺时针、0不转；grade=18中档，可填16/17/18/19/20，越高加减速越强。 */
         if (!ids[3]) goto failed;
 
         stage = "wait";

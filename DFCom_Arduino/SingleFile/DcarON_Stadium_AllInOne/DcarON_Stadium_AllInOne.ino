@@ -667,7 +667,7 @@ void setup()
 bool segmentDone()
 {
     if (DFCom.waitDone(60000)) return true;
-    DFCom.stop();
+    DFCom.stop();                    // 无参数；发送全零速度停车，不提交后续段。
     testStopped = true;
     return false;
 }
@@ -676,13 +676,14 @@ void loop()
 {
     DFCom.update();                   // 即使运动失败也继续收真实遥测
     if (testStopped) return;
-    DFCom.moveArc(30, 180, -15, 1);    // 半径30cm，倒行半圆
+    // 以下每行独立调参；本例程保持默认厘米/度，实际速度与加速度由车端能力限制。
+    DFCom.moveArc(30, 180, -15, 1);    // radius=30cm须>0，越大弧越宽；yaw=180度，正逆时针/负顺时针，绝对值越大转得越多；speed=-15cm/s须非0，负倒行/正前行，绝对值越大越快；profile=1梯形加减速，可填0匀速/1梯形/2距离闭环，不是16~20档位。
     if (!segmentDone()) return;
-    DFCom.moveLinear(-60, 0, 15, 1);   // 后退60cm
+    DFCom.moveLinear(-60, 0, 15, 1);   // x=-60cm后退，正前/负后、绝对值越大越远；y=0cm不侧移，正左/负右；speed=15cm/s须>0，越大越快，后退用负x；profile=1梯形加减速，可填0匀速/1梯形/2距离闭环。
     if (!segmentDone()) return;
-    DFCom.moveArc(30, 180, -15, 1);
+    DFCom.moveArc(30, 180, -15, 1);    // radius=30cm须>0，增大弧更宽；yaw=180度，正逆时针/负顺时针，绝对值控制转角；speed=-15cm/s须非0，负倒行/正前行，绝对值控制快慢；profile=1梯形，可填0匀速/1梯形/2距离闭环；本行可独立于第一段修改。
     if (!segmentDone()) return;
-    DFCom.moveLinearWithYaw(-60, 0, 360, 15, 1); // 后退同时旋转一圈
+    DFCom.moveLinearWithYaw(-60, 0, 360, 15, 1); // x=-60cm后退，正前/负后；y=0cm不侧移，正左/负右、位移绝对值越大越远；yaw=360度，平移同时逆时针转一圈，负值顺时针、0不转；speed=15cm/s须>0，越大越快；profile=1梯形，可填0匀速/1梯形/2距离闭环。
     if (!segmentDone()) return;
     completedLaps++;                  // loop立即开始下一圈，不添加圈间延时
 }

@@ -1,7 +1,8 @@
-# Holonomic chassis only. Reverse stadium, final straight +360 degree yaw.
-timeout: 60.0
+# 仅全向底盘；每行运动独立调参。单位：米、弧度、米/秒。
+# profile在线上为加速度档位：16极低、17低、18中、19高、20极高，越高加减速越强，实际限值由车端决定。
+timeout: 60.0 # 整圈任务时限，单位秒，>0为实际上限；0采用桥接默认时限。
 segments:
-  - {command: 102, radius: 0.3, yaw: 3.141592653589793, speed: -0.15, profile: 18}
-  - {command: 100, x: -0.6, speed: 0.15, profile: 18}
-  - {command: 102, radius: 0.3, yaw: 3.141592653589793, speed: -0.15, profile: 18}
-  - {command: 100, x: -0.6, yaw: 6.283185307179586, speed: 0.15, profile: 18}
+  - {command: 102, radius: 0.3, yaw: 3.141592653589793, speed: -0.15, profile: 18} # command=102圆弧；radius=0.3米须>0，越大弧越宽；yaw约+180°，正逆时针/负顺时针，绝对值越大转得越多；speed=-0.15米/秒须非0，负倒行/正前行，绝对值越大越快；profile=18中档，可填16~20。
+  - {command: 100, x: -0.6, y: 0.0, speed: 0.15, yaw: 0.0, profile: 18} # command=100直线；x=-0.6米后退，正前/负后；y=0米不侧移，正左/负右，绝对值越大走得越远；speed=0.15米/秒须>0，越大越快；yaw=0弧度不转向；profile=18中档，可填16~20。
+  - {command: 102, radius: 0.3, yaw: 3.141592653589793, speed: -0.15, profile: 18} # command=102圆弧；radius=0.3米须>0，增大弧更宽；yaw约+180°，正逆时针/负顺时针；speed=-0.15米/秒须非0，负倒行/正前行，绝对值控制快慢；profile=18中档，可填16~20；与第一段独立调整。
+  - {command: 100, x: -0.6, y: 0.0, yaw: 6.283185307179586, speed: 0.15, profile: 18} # command=100平移；x=-0.6米后退，正前/负后；y=0米不侧移，正左/负右；yaw约+360°，边平移边逆时针转一圈，负值顺时针、0不转；speed=0.15米/秒须>0，越大越快；profile=18中档，可填16~20。

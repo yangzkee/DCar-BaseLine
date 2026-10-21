@@ -41,6 +41,8 @@ ros2 launch dcaron_bridge stadium_test.launch.py port:=COM5
 
 ## Odom遥测与话题
 
+各段运动数值位于 [stadium.yaml](dcaron_bridge/examples/stadium.yaml)，每行末尾解释全部字段。可分别修改各段 `speed` 与 `profile`（队列加速度档位16～20），无需调整公共常量；修改源码目录中的 YAML 后重新 `colcon build` 并加载安装环境，使持续测试使用更新后的安装文件。
+
 每次串口连接发送一次 Odom 10Hz 连续订阅，至少间隔20ms后查询状态；只接收 Odom 遥测。
 Odom 数据独立解析和保存；状态与遥测缺失只报告，不拒绝运动、不单独触发重连。任务必须按自身ACK / DONE / 超时完成。
 

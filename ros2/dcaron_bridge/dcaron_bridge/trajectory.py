@@ -106,5 +106,5 @@ if __name__ == '__main__':
 def stadium_main():
     """Installed continuous stadium client; one launch starts the complete test."""
     from ament_index_python.packages import get_package_share_directory
-    path = Path(get_package_share_directory('dcaron_bridge')) / 'examples/stadium.yaml'
+    path = Path(get_package_share_directory('dcaron_bridge')) / 'examples/stadium.yaml'  # 四条运动逐行数值及参数说明在此YAML，各段速度/档位可分别调整。
     main([str(path), '--execute'], repeat=True)
