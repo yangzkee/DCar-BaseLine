@@ -56,6 +56,7 @@ class QueueClient:
         self.last, self.attempts, self.final_notice = -1e9, 0, 0
         self.feedback = None
         self.motion_started = False
+        self.version = 0
 
     @property
     def done(self): return self.state == 'done'
@@ -95,6 +96,7 @@ class QueueClient:
         if self.state == 'probe':
             if notice == 0x21:
                 if task_id < 6: raise ValueError('Queue mode requires v6 firmware; no legacy fallback')
+                self.version = task_id
                 self.state, self.last, self.attempts = 'sync', -1e9, 0
             return
         if self.state == 'sync':
@@ -108,13 +110,14 @@ class QueueClient:
             # Full is not terminal. Retain this ID and retry with bounded deadline at caller.
             item['attempts'] = 0
             return
-        if notice not in (0, 0x10, 0x25, 0x27):
+        warning = self.version >= 7 and process == 255 and notice in (0x24, 0x26)
+        if notice not in (0, 0x10, 0x25, 0x27) and not warning:
             raise QueueFault(f'Task {task_id} rejected: notice=0x{notice:02x}', notice)
         item['accepted'] = True
         self.feedback = (task_id, item['index'], process, notice)
         if process == 255:
-            if notice not in SUCCESS: raise ValueError('Invalid terminal notice')
+            if notice not in SUCCESS and not warning: raise ValueError('Invalid terminal notice')
             self.completed.add(task_id)
             del self.pending[task_id]
-            if notice == 0x27: self.final_notice = notice
+            if warning or (notice == 0x27 and self.final_notice == 0): self.final_notice = notice
             if len(self.completed) == len(self.specs): self.state = 'done'

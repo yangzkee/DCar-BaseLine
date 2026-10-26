@@ -5,7 +5,8 @@
 volatile u32 g_local_tick_ms;
 void DFCom_Poll(void) {}
 static u8 tx[100],txlen;
-static u8 no_reply,drop_ack,tx_error,split_at;
+static u8 no_reply,drop_ack,tx_error,split_at,fast_notice;
+static unsigned stop_count;
 static u16 capability=6;
 static u8 available=16;
 static u16 next_id=65535;
@@ -25,6 +26,7 @@ void delay_ms(u32 ms){g_local_tick_ms+=ms;}
 void delay_us(u32 us){(void)us;}
 u8 USART1_Send_By_DMA(u8 *b,u8 len){
     u16 id;memcpy(tx,b,len);txlen=len;
+    if(b[4]==0x62 || (b[4]==0x85 && b[6]==4))stop_count++;
     if(tx_error)return 1;
     if(no_reply)return 0;
     if(b[4]==0x85){
@@ -34,7 +36,7 @@ u8 USART1_Send_By_DMA(u8 *b,u8 len){
     }else if(b[4]>=0x63 && b[4]<=0x66){
         id=(u16)b[4+b[5]]|((u16)b[5+b[5]]<<8);
         if(drop_ack){drop_ack=0;return 0;}
-        reply(0,0x10,id);
+        reply(fast_notice?255:0,fast_notice?fast_notice:0x10,id);
     }
     return 0;
 }
@@ -106,5 +108,21 @@ int main(void){
     telemetry_reply(0x80,50,4);
     telemetry_reply(0x80,51,3);
     assert(g_odom.frame_count==2 && g_dfcom_rx_diag.odom_rejected==2);
+    /* v7 terminal warnings consume one result without cancelling subsequent IDs. */
+    capability=7;assert(DFQueue_Begin());
+    for(i=0;i<2;i++) {
+        unsigned stops_before=stop_count;u8 warning=i?0x26:0x24;
+        a=DFQueue_Rotate(1,.5f);b=DFQueue_Rotate(1,.5f);assert(a && b);
+        reply(255,warning,a);reply(0,0x10,a); /* late ACK cannot erase warning */
+        assert(DFQueue_Wait(a,100)==4); /* distinct WARN result, not DONE */
+        assert(DFQueue_LastNotice()==warning && stop_count==stops_before);
+        reply(255,0,b);assert(DFQueue_Wait(b,100)==DF_QUEUE_WAIT_DONE);
+        fast_notice=warning;a=DFQueue_Rotate(1,.5f);fast_notice=0;
+        assert(a && DFQueue_Wait(a,100)==4 && stop_count==stops_before);
+    }
+    a=DFQueue_Rotate(1,.5f);reply(255,0x22,a);
+    assert(DFQueue_Wait(a,100)==DF_QUEUE_WAIT_FAULT);
+    capability=6;assert(DFQueue_Begin());a=DFQueue_Rotate(1,.5f);reply(255,0x24,a);
+    assert(DFQueue_Wait(a,100)==DF_QUEUE_WAIT_FAULT);
     puts("queue wire, rollover, duplicate, trim, query, failures and fragmented/coalesced RX passed");return 0;
 }

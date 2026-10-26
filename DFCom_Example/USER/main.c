@@ -123,12 +123,18 @@ int main(void)
                    (unsigned long)lap, (unsigned)(i+1), (unsigned)ids[i]);
             /* 每次Wait的上限，不是整圈的总截止时间；0不表示无限等。 */
             result = DFQueue_Wait(ids[i], DEMO_WAIT_MS);
+            if (result == DF_QUEUE_WAIT_WARN) {
+                printf("[QUEUE] lap=%lu segment=%u/4 task=%u WARNING notice=0x%02X; retired, continuing\r\n",
+                       (unsigned long)lap, (unsigned)(i+1), (unsigned)ids[i],
+                       (unsigned)DFQueue_LastNotice());
+                continue;
+            }
             if (result != DF_QUEUE_WAIT_DONE) goto failed;
             printf("[QUEUE] lap=%lu segment=%u/4 task=%u DONE notice=0x%02X\r\n",
                    (unsigned long)lap, (unsigned)(i+1), (unsigned)ids[i],
                    (unsigned)DFQueue_LastNotice());
         }
-        printf("[LAP] DONE %lu: 4 tasks completed; next lap immediately\r\n",
+        printf("[LAP] DONE %lu: 4 tasks retired (see per-task warnings); next lap immediately\r\n",
                (unsigned long)lap);
         /* 不延时、不等用户触发；完成确认后立即开始下一圈。
          * 车端仍可能在段末减速/微调；循环运行不等于全程速度不为零。

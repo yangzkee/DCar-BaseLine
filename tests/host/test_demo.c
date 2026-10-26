@@ -57,6 +57,7 @@ u16 DFQueue_Arc(float radius,float yaw,float speed,u8 grade) {
 }
 u8 DFQueue_Wait(u16 id,u32 timeout) {
     waited++; assert(id==waited && timeout==60000);
+    if (strcmp(scenario,"wait-warning")==0) return DF_QUEUE_WAIT_WARN;
     return strcmp(scenario,"wait-failure")==0 ? DF_QUEUE_WAIT_FAULT : DF_QUEUE_WAIT_DONE;
 }
 void DFQueue_Cancel(void) { canceled++; }

@@ -421,6 +421,7 @@ static volatile u8 q_query_notice;
 static volatile u8 q_query_process;
 static volatile u8 q_query_ready;
 static volatile u8 q_enabled;
+static u16 q_version;
 static u16 q_next;
 static const char *q_error = "none";
 static u8 q_last_notice;
@@ -509,6 +510,7 @@ u8 DFQueue_Begin(void)
         q_error = "device does not support queue v6";
         return 0;
     }
+    q_version = q_query_id;
     if (!q_query(7, 0x28)) return 0;
     if (!q_query_id || q_query_process != 16) {
         q_error = "device queue is not empty or next task ID is invalid";
@@ -614,7 +616,8 @@ static u16 q_submit(u8 command, const float *values, u8 count, u8 grade)
         start = g_local_tick_ms;
         while ((u32)(g_local_tick_ms - start) < 500) {
             if (DFQueue_Status(id, &process, &notice)) {
-                if (notice == 0 || notice == 0x10 || notice == 0x25 || notice == 0x27) {
+                if (notice == 0 || notice == 0x10 || notice == 0x25 || notice == 0x27 ||
+                    (q_version >= 7 && process == 255 && (notice == 0x24 || notice == 0x26))) {
                     q_next = id == 65535 ? 1 : (u16)(id + 1);
                     return id;  /* 入队确认或后续状态，不表示动作已结束。 */
                 }
@@ -679,6 +682,10 @@ u8 DFQueue_Wait(u16 id, u32 timeout_ms)
     while ((u32)(g_local_tick_ms - start) < timeout_ms) {
         if (DFQueue_Status(id, &process, &notice) && process == 255 && notice != 0x11) {
             q_last_notice = notice;
+            if (q_version >= 7 && (notice == 0x24 || notice == 0x26)) {
+                for (i = 0; i < DF_QUEUE_MAX_TASKS; i++) if (q_slots[i].id == id) q_slots[i].id = 0;
+                return DF_QUEUE_WAIT_WARN; /* Segment retired, not precision success. */
+            }
             if (notice != 0 && notice != 0x27) {
                 q_error = "device reported task failure";
                 DFQueue_Cancel();

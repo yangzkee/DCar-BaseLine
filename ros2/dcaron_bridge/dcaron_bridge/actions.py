@@ -174,7 +174,10 @@ class MotionActions:
                 feedback.process, feedback.notice = process, notice
                 feedback.percent = 100.0 if process == 255 else max(0.0,(process-1)*100.0/254)
                 active['handle'].publish_feedback(feedback)
-            if queue.done: self.finish('succeeded',queue.final_notice,'All task IDs completed')
+            if queue.done:
+                message = ('Queue finished with segment warnings; precision not guaranteed'
+                           if queue.final_notice in (0x24,0x26) else 'All task IDs completed')
+                self.finish('succeeded',queue.final_notice,message)
             return
         try:
             progress = decode_progress(packet)

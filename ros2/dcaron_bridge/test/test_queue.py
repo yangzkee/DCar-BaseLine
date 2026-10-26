@@ -40,4 +40,19 @@ class QueueTests(unittest.TestCase):
         q=QueueClient([MotionSpec(100,x=.1,speed=.1,profile=18)],lambda _:None)
         q.tick(0);q.tick(.5);q.tick(1)
         with self.assertRaises(TimeoutError):q.tick(1.5)
+    def test_v7_warnings_continue_and_survive_final_success(self):
+        for notice in (0x24,0x26):
+            tx=[];q=QueueClient([MotionSpec(100,x=.1,speed=.1,profile=18)]*2,tx.append)
+            q.tick(0);q.receive(reply(16,0x21,7));q.tick(.01);q.receive(reply(16,0x28,1));q.tick(.02)
+            q.receive(reply(255,notice,1)) # terminal can arrive before admission ACK
+            self.assertEqual(q.feedback,(1,0,255,notice))
+            q.receive(reply(0,0x10,1));q.tick(.03)
+            self.assertIn(2,q.pending)
+            q.receive(reply(255,0x27,2))
+            self.assertTrue(q.done);self.assertEqual(q.final_notice,notice)
+    def test_v7_nonterminal_warning_and_other_fault_still_fail(self):
+        for process,notice in ((254,0x24),(254,0x26),(255,0x22),(255,0x23)):
+            q=QueueClient([MotionSpec(100,x=.1,speed=.1,profile=18)],lambda _:None)
+            q.tick(0);q.receive(reply(16,0x21,7));q.tick(.01);q.receive(reply(16,0x28,1));q.tick(.02)
+            with self.assertRaises(ValueError):q.receive(reply(process,notice,1))
 if __name__=='__main__':unittest.main()

@@ -14,7 +14,7 @@ for variant in DFCom_Example DFCom_PatchOnly; do
     cc -std=c99 -Wall -Wextra -Werror -Itests/host/stubs -I"$variant/HARDWARE" \
         tests/host/test_telemetry_print.c "$build/print.o" -o "$build/telemetry"
     "$build/telemetry"
-    for scenario in happy with-odom odom-only no-state no-telemetry uncalibrated begin-failure submit-failure wait-failure; do
+    for scenario in happy with-odom odom-only no-state no-telemetry uncalibrated begin-failure submit-failure wait-failure wait-warning; do
         "$build/demo" "$scenario"
     done
 done

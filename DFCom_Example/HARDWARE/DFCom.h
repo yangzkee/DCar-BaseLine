@@ -298,6 +298,7 @@ void Odom_PrintTimer_Init(void);    /* 启动1ms计时，打印由Poll调度 */
 #define DF_QUEUE_MAX_TASKS    8
 #define DF_QUEUE_WAIT_DONE    1  /* process=255且notice=0或0x27 */
 #define DF_QUEUE_WAIT_TIMEOUT 2  /* 超时、未知ID或零时限 */
+#define DF_QUEUE_WAIT_WARN    4  /* v7+: terminal 0x24/0x26, continue with warning */
 #define DF_QUEUE_WAIT_FAULT   3  /* 车端故障；LastNotice保留原因码 */
 #define DF_ACCEL_VERY_LOW    16
 #define DF_ACCEL_LOW         17
