@@ -5,6 +5,29 @@ from dcaron_bridge.queue import QueueClient,encode,validate
 
 def reply(p,n,i):return Parser().feed(frame(0x6f,0x85,struct.pack('<BBH',p,n,i),151,1))[0]
 class QueueTests(unittest.TestCase):
+    def test_unified_line_yaw_and_all_grades(self):
+        # Both public command names must use the same 0x64 wire contract.
+        # Keep grade outside the signed yaw field, including a full reverse turn.
+        for grade in range(16,21):
+            for yaw in (0.0, -math.pi/2, 2*math.pi):
+                packets=[encode(MotionSpec(command,x=.3,y=-.1,speed=.15,
+                                          yaw=yaw,profile=grade),42)
+                         for command in (100,101)]
+                self.assertEqual(packets[0],packets[1])
+                f=Parser().feed(packets[0])[0]
+                expected=struct.pack('<iii',3000,-1000,1500)
+                if yaw: expected+=struct.pack('<i',int(yaw*10000))
+                self.assertEqual((f.b,f.payload),(0x64,expected+struct.pack('<BH',grade,42)))
+
+    def test_successor_admitted_before_first_done(self):
+        q,tx=self.ready([MotionSpec(100,x=.3,speed=.15,profile=18),
+                        MotionSpec(100,y=.3,yaw=math.pi/2,speed=.15,profile=18)])
+        q.tick(.02);q.receive(reply(0,0x10,65535));q.tick(.03)
+        self.assertEqual(q.cursor,2)
+        self.assertFalse(q.completed)
+        self.assertEqual(set(q.pending),{65535,1})
+        self.assertEqual(Parser().feed(tx[-1])[0].b,0x64)
+
     def ready(self,specs=None,sequential=False):
         tx=[];q=QueueClient(specs or [MotionSpec(100,x=.1,speed=.1,profile=18)]*3,tx.append,sequential=sequential)
         q.tick(0);q.receive(reply(16,0x21,6));q.tick(.01);q.receive(reply(16,0x28,65535));return q,tx

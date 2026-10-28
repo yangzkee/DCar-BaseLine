@@ -49,15 +49,17 @@ Example 与 PatchOnly 的能力相同，差别在工程依赖是否齐全。STM3
 
 ### Beta 队列警告兼容（2026-10-27）
 
+本次车端 v4.2.10 Beta 的直线/平移转向、提前衔接、结束锁头及验证边界，见 [Beta v4.2.10 对接说明](docs/Beta_v4.2.10_运动对接.md)。现有 `DFQueue_Linear` 与 ROS `command=100` 可直接使用，无需更换帧格式；需要衔接时应提前提交后续段。
+
 STM32 Example/PatchOnly 与 ROS 握手确认队列版本 ≥7 后，将 `process=255` 且 `notice=0x24/0x26` 视为“本段警告退段”，保留原码并继续后续任务，不主动取消或发零速；这不表示本段达到精度。STM32 `DFQueue_Wait()` 新增 `DF_QUEUE_WAIT_WARN=4`，示例打印 WARNING；自有调用方也须显式处理此返回值。ROS 在 feedback 保留每段警告，最终结果的 notice/message 保留警告；success 表示队列流程结束，不代表所有段精确完成。版本6保持原有故障处理，通信超时及其他故障处理不变。Arduino 无任务ID的接口不作此放宽。
 
 <a id="下载接线"></a>
 ## 3. 下载、接线与车端要求
 
-下载 **main** 当前源码，或在 main 页面选 Code → Download ZIP：
+本页为 **Beta** 版。下载 Beta 当前源码，或在 Beta 页面选 Code → Download ZIP：
 
 ```sh
-git clone --branch main https://github.com/yangzkee/DCar-BaseLine.git
+git clone --branch Beta https://github.com/yangzkee/DCar-BaseLine.git
 cd DCar-BaseLine
 ```
 
@@ -98,7 +100,7 @@ STM32 声明见 [DFCom.h](DFCom_Example/HARDWARE/DFCom.h)，组帧与任务管�
 | `DFQueue_Linear(x,y,speed,yaw,grade)` | 相对段起点平移 x/y 米；speed 为正 m/s；同时转 yaw 弧度；负 x 后退 | 非零 ID 表示确认入队，0 失败 |
 | `DFQueue_Rotate(yaw,omega)` | 原地相对转角，正 yaw 左转，omega 为正 rad/s | 非零 ID 仅表示入队 |
 | `DFQueue_Arc(radius,yaw,signed_speed,grade)` | 正半径米、相对转角弧度；有符号速度 m/s，负值倒行 | 非零 ID 仅表示入队 |
-| `DFQueue_Wait(id,timeout_ms)` | 等任务终态，内部持续 Poll | 1 DONE；2 超时 / 未知 ID / 零时限；3 设备故障。timeout 必须 >0；成功释放槽 |
+| `DFQueue_Wait(id,timeout_ms)` | 等任务终态，内部持续 Poll | 1 DONE；2 超时 / 未知 ID / 零时限；3 设备故障；4 WARN（握手版本≥7的0x24/0x26）。timeout 必须 >0；DONE/WARN消费结果并释放槽 |
 | `DFQueue_Status(id,&process,&notice)` | 非阻塞读取该 ID 最近回包，不释放槽 | 1 有回包，0 没有；返回 1 不表示成功完成 |
 | `DFQueue_LastError()` / `DFQueue_LastNotice()` | 最近操作的原因 / 通知码 | 失败日志一起记录 |
 | `DFQueue_Cancel()` | 尝试取消并发送零速，清理本地会话 | 无返回值；下一批重新 Begin，断线时不能确认停车 |
