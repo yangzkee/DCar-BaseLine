@@ -65,6 +65,19 @@ frame名称只标识坐标系，不自动旋转数据；当前按FLU（前/左/�
 
 ## 自定义动作与只读应用
 
+通用桥接入口默认自动扫描串口。Linux 扫描 `ttyUSB` 和 `ttyACM`，Windows 扫描 COM 端口。
+收到地址匹配且可解码的 Odom 后才选用该端口。可以用 `port:=COM5` 等参数指定端口。
+
+在 Linux 上使用终端面板时，先运行桥接，再在另一个终端运行面板：
+
+```sh
+ros2 launch dcaron_bridge bridge.launch.py enable_cmd_vel:=true
+ros2 run dcaron_bridge dcaron_console
+```
+
+面板显示里程计和 ROS 2 话题，支持方向键、WASD、Q/E、空格停车和 Esc 退出。
+默认速度指令超时为 0.5 秒。
+
 只读应用可单独启动桥接（不会自动运动）：
 
 ```sh

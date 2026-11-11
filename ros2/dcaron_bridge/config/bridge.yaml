@@ -1,6 +1,7 @@
 /**:
   ros__parameters:
-    port: COM3
+    port: auto
+    auto_detect_timeout: 0.6
     baudrate: 460800
     robot_id: 1
     host_id: 151

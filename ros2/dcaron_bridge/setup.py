@@ -20,6 +20,7 @@ setup(
     license="Proprietary",
     tests_require=["pytest"],
     entry_points={"console_scripts": ["dcaron_bridge = dcaron_bridge.node:main",
+                                      "dcaron_console = dcaron_bridge.console:main",
                                       "trajectory_sequence = dcaron_bridge.trajectory:main",
                                       "motion_sequence = dcaron_bridge.sequence:main",
                                       "stadium_test = dcaron_bridge.trajectory:stadium_main"]},

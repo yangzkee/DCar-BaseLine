@@ -1,6 +1,7 @@
 """One serial owner, standard ROS topics. All IO runs in one executor thread."""
 
 import math
+import os
 import time
 
 import rclpy
@@ -14,6 +15,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from tf2_ros import TransformBroadcaster
 import serial
+from serial.tools import list_ports
 
 from .protocol import Parser, CommandWatchdog, subscribe, velocity, frame, quaternion
 from .telemetry import TelemetryReceiver
@@ -26,6 +28,7 @@ class DcaronBridge(Node):
         super().__init__("dcaron_bridge", **kwargs)
         defaults = {
             "port": "COM3", "baudrate": 460800, "robot_id": 1, "host_id": 151,
+            "auto_detect_timeout": 0.6,
             "frequency": 10, "publish_imu": False,
             "enable_cmd_vel": False, "cmd_timeout": 0.5,
             "max_linear_speed": 0.5, "max_angular_speed": 1.0,
@@ -40,9 +43,10 @@ class DcaronBridge(Node):
             for key, value in defaults.items()}
         c = self.cfg
         if c["motion_protocol"] not in ("queue", "legacy"): raise ValueError("motion_protocol must be queue or legacy")
-        for key in ("cmd_timeout", "max_linear_speed", "max_angular_speed",
+        for key in ("max_linear_speed", "max_angular_speed",
                     "telemetry_timeout", "reconnect_interval", "motion_timeout",
-                    "max_motion_timeout", "max_displacement", "max_rotation"):
+                    "max_motion_timeout", "max_displacement", "max_rotation",
+                    "auto_detect_timeout"):
             if not math.isfinite(c[key]) or c[key] <= 0:
                 raise ValueError(f"{key} must be positive and finite")
         for key in ("robot_id", "host_id"):
@@ -75,6 +79,7 @@ class DcaronBridge(Node):
         self.stale_reported = False
         self.invalid_reported = False
         self.connected_at = 0.0
+        self.active_port = None
         # Reliable publishers also satisfy best-effort sensor subscribers.
         self.odom_pub = self.create_publisher(Odometry, "odom", 10)
         self.imu_pub = self.create_publisher(Imu, "imu/data", 10) if c["publish_imu"] else None
@@ -104,6 +109,56 @@ class DcaronBridge(Node):
         if self.port.write(data) != len(data):
             raise serial.SerialException("Incomplete DFLink write")
 
+    def open_port(self):
+        """Open an explicit port, or identify DCar by a valid telemetry reply."""
+        c = self.cfg
+        if c["port"].lower() != "auto":
+            self.active_port = c["port"]
+            return self.serial_factory(c["port"], c["baudrate"], timeout=0,
+                                       write_timeout=0.1)
+        candidates = sorted(
+            (item for item in list_ports.comports()
+            if os.name == "nt" or item.device.startswith(("/dev/ttyUSB", "/dev/ttyACM"))),
+            key=lambda item: item.device)
+        if not candidates:
+            raise serial.SerialException("No USB serial candidates found")
+        for item in candidates:
+            candidate = None
+            try:
+                candidate = self.serial_factory(item.device, c["baudrate"], timeout=0,
+                                                write_timeout=0.1)
+                probe = self.subscription_frames[0]
+                if candidate.write(probe) != len(probe):
+                    raise serial.SerialException("Incomplete probe write")
+                parser = Parser()
+                receiver = TelemetryReceiver()
+                deadline = time.monotonic() + c["auto_detect_timeout"]
+                while time.monotonic() < deadline:
+                    waiting = min(candidate.in_waiting, 4096)
+                    for packet in parser.feed(candidate.read(waiting)):
+                        if (packet.target, packet.source) != (c["host_id"], c["robot_id"]):
+                            continue
+                        if receiver.receive(packet, time.monotonic()) != "odom":
+                            continue
+                        self.active_port = item.device
+                        self.get_logger().info(
+                            f"Auto-detected DCar on {item.device} "
+                            f"({item.description or 'USB serial'})")
+                        return candidate
+                    time.sleep(0.01)
+            except (OSError, ValueError, serial.SerialException) as exc:
+                self.get_logger().debug(f"DCar probe rejected {item.device}: {exc}")
+            if candidate is not None:
+                try:
+                    candidate.write(subscribe("odom", c["frequency"], False,
+                                              c["robot_id"], c["host_id"]))
+                except (OSError, serial.SerialException):
+                    pass
+                candidate.close()
+        raise serial.SerialException(
+            "No DCar telemetry reply on USB serial candidates: "
+            + ", ".join(item.device for item in candidates))
+
     def stop(self):
         self.write(velocity(0, 0, 0, self.cfg["robot_id"], self.cfg["host_id"]))
         self.watchdog.reset()
@@ -118,6 +173,7 @@ class DcaronBridge(Node):
             except (OSError, serial.SerialException):
                 pass
         self.port = None
+        self.active_port = None
         self.parser = Parser()
         self.watchdog.reset()
         self.last_rx = None
@@ -154,12 +210,11 @@ class DcaronBridge(Node):
             if self.port is None:
                 if now < self.next_connect:
                     return
-                self.port = self.serial_factory(self.cfg["port"], self.cfg["baudrate"],
-                                                timeout=0, write_timeout=0.1)
+                self.port = self.open_port()
                 self.parser = Parser()
                 self.watchdog.reset()
                 self.last_rx = None
-                self.connected_at = now
+                now = self.connected_at = time.monotonic()
                 self.telemetry = TelemetryReceiver()
                 self.last_published = None
                 self.device_state = None
@@ -167,9 +222,11 @@ class DcaronBridge(Node):
                 self.stale_reported = False
                 if self.cfg["enable_cmd_vel"] or self.cfg['enable_motion_actions']:
                     self.stop()
-                self.pending_subscriptions = list(self.subscription_frames)
+                # The successful probe already subscribed to Odom.
+                first_pending = 1 if self.cfg["port"].lower() == "auto" else 0
+                self.pending_subscriptions = self.subscription_frames[first_pending:]
                 self.next_subscription = now
-                self.get_logger().info("Serial connected; Odom/state requests scheduled")
+                self.get_logger().info(f"Serial connected on {self.active_port}")
             if self.pending_subscriptions and now >= self.next_subscription:
                 self.write(self.pending_subscriptions.pop(0))
                 self.next_subscription = now + 0.02  # Independent requests, once per connection.

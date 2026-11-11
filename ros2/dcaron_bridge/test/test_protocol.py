@@ -96,6 +96,7 @@ class ProtocolTests(unittest.TestCase):
     def test_watchdog_boundary_and_reconnect(self):
         watchdog = CommandWatchdog(0.5)
         self.assertFalse(watchdog.expired(100))
+
         watchdog.received(10)
         self.assertFalse(watchdog.expired(10.499))
         self.assertTrue(watchdog.expired(10.5))
@@ -103,6 +104,14 @@ class ProtocolTests(unittest.TestCase):
         watchdog.received(20)
         watchdog.reset()
         self.assertFalse(watchdog.expired(100))
+
+    def test_watchdog_disabled(self):
+        watchdog = CommandWatchdog(0.0)
+        watchdog.received(10)
+        self.assertFalse(watchdog.expired(100000))
+        for timeout in (-1.0, float('nan'), float('inf')):
+            with self.assertRaises(ValueError):
+                CommandWatchdog(timeout)
 
 
 if __name__ == '__main__':

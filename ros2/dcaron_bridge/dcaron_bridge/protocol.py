@@ -130,8 +130,8 @@ class CommandWatchdog:
     """Return a stop once when a command expires; reconnect discards commands."""
 
     def __init__(self, timeout):
-        if not math.isfinite(timeout) or timeout <= 0:
-            raise ValueError("cmd_timeout must be positive and finite")
+        if not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("cmd_timeout must be nonnegative and finite; zero disables it")
         self.timeout = timeout
         self.last = None
 
@@ -142,7 +142,7 @@ class CommandWatchdog:
         self.last = now
 
     def expired(self, now):
-        if self.last is not None and now - self.last >= self.timeout:
+        if self.timeout > 0 and self.last is not None and now - self.last >= self.timeout:
             self.reset()
             return True
         return False
