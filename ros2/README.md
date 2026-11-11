@@ -6,9 +6,14 @@
 
 电脑串口直连车端DFLink口，默认队列v6。`dcaron_interfaces`定义动作/轨迹消息，`dcaron_bridge`提供串口桥、Odom遥测与测试客户端；不包含车端固件，也不是Nav2导航器。
 
+- **串口自动识别**：通用桥接启动时扫描串口，根据有效的 DCar Odom 回包选定端口。
+- **Linux 终端控制台**：用键盘遥控底盘，同时查看里程计、反馈速度和 ROS 2 话题。
+
 ## 目录
 
 - [构建](#构建)
+- [串口自动识别](#串口自动识别)
+- [Linux 终端控制台](#linux-终端控制台)
 - [一条命令持续操场测试](#一条命令持续操场测试)
 - [Odom遥测与话题](#Odom遥测与话题)
 - [自定义动作与只读应用](#自定义动作与只读应用)
@@ -28,6 +33,42 @@ source install/setup.bash
 
 车端须已激活/校准、支持队列v6和相应运动能力。USB-TTL 3.3V TTL，460800 / 8N1，TX/RX交叉、GND共地，不经过STM32示例板。关闭占用同一串口的助手和脚本。
 
+## 串口自动识别
+
+```sh
+ros2 launch dcaron_bridge bridge.launch.py
+```
+
+通用桥接入口默认使用 `port:=auto`，扫描 Linux 的 `/dev/ttyUSB*`、`/dev/ttyACM*` 或 Windows 的 COM 端口。探测时发送 Odom 订阅请求，收到地址匹配且可解码的 Odom 回包后才选用端口。未匹配时会记录错误并重试。车载无线串口也需要能双向透传 DFLink 数据，只有 USB 设备枚举成功还无法完成匹配。
+
+已知端口时可用 `port:=/dev/ttyUSB0` 或 `port:=COM5` 跳过扫描。配置文件中的 `auto_detect_timeout` 是每个候选端口的等待时间，默认 0.6 秒。
+
+## Linux 终端控制台
+
+在第一个终端启动桥接并开启速度控制，然后在第二个终端启动面板。两个终端都需要加载同一 ROS 2 工作区。
+
+```sh
+# 终端 1
+ros2 launch dcaron_bridge bridge.launch.py enable_cmd_vel:=true
+
+# 终端 2
+ros2 run dcaron_bridge dcaron_console
+```
+
+面板需要至少 71 列 × 24 行，显示上次发送的速度指令、`/odom` 的位置、航向、反馈速度与数据新鲜度，以及 ROS 2 话题的类型和发布、订阅数量。
+
+| 按键 | 操作 |
+|---|---|
+| W / ↑、S / ↓ | 前进、后退 |
+| A / ←、D / → | 左移、右移，需要支持横移的底盘 |
+| Q、E | 左转、右转 |
+| +、- | 调整速度 |
+| 空格、X | 发送零速度 |
+| R | 发送零速度并刷新话题 |
+| Esc | 尝试发送零速度并退出 |
+
+控制台只在按键时发送速度指令。松键后，由桥接的 `cmd_timeout` 处理，默认在 0.5 秒没有新速度指令时尝试发零。`cmd_timeout: 0.0` 会关闭桥接侧的超时停车。实体串口和无线链路需要在实际设备上验收。
+
 ## 一条命令持续操场测试
 
 ```sh
@@ -43,7 +84,7 @@ ros2 launch dcaron_bridge stadium_test.launch.py port:=COM5
 
 各段运动数值位于 [stadium.yaml](dcaron_bridge/examples/stadium.yaml)，每行末尾解释全部字段。可分别修改各段 `speed` 与 `profile`（队列加速度档位16～20），无需调整公共常量；修改源码目录中的 YAML 后重新 `colcon build` 并加载安装环境，使持续测试使用更新后的安装文件。
 
-每次串口连接发送一次 Odom 10Hz 连续订阅，至少间隔20ms后查询状态；只接收 Odom 遥测。
+每次串口连接发送一次 Odom 连续订阅（默认 10 Hz），随后查询状态。自动识别成功时沿用探测阶段发出的订阅。
 Odom 数据独立解析和保存；状态与遥测缺失只报告，不拒绝运动、不单独触发重连。任务必须按自身ACK / DONE / 超时完成。
 
 | 默认无namespace接口 | 类型 | 来源 / 用途 |
@@ -64,19 +105,6 @@ Pro的Odometry角速度来自 Odom 陀螺仪；Std的零占位不代表实测静
 frame名称只标识坐标系，不自动旋转数据；当前按FLU（前/左/上）解释。
 
 ## 自定义动作与只读应用
-
-通用桥接入口默认自动扫描串口。Linux 扫描 `ttyUSB` 和 `ttyACM`，Windows 扫描 COM 端口。
-收到地址匹配且可解码的 Odom 后才选用该端口。可以用 `port:=COM5` 等参数指定端口。
-
-在 Linux 上使用终端面板时，先运行桥接，再在另一个终端运行面板：
-
-```sh
-ros2 launch dcaron_bridge bridge.launch.py enable_cmd_vel:=true
-ros2 run dcaron_bridge dcaron_console
-```
-
-面板显示里程计和 ROS 2 话题，支持方向键、WASD、Q/E、空格停车和 Esc 退出。
-默认速度指令超时为 0.5 秒。
 
 只读应用可单独启动桥接（不会自动运动）：
 
