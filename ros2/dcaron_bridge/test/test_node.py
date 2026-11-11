@@ -3,6 +3,7 @@
 import struct
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 try:
@@ -46,6 +47,32 @@ class FakeSerial:
 
 @unittest.skipIf(rclpy is None, 'ROS runtime unavailable; protocol tests still run')
 class RosNodeTests(unittest.TestCase):
+    def test_auto_port_requires_valid_odom_from_configured_robot(self):
+        from rclpy.parameter import Parameter
+        from dcaron_bridge.node import DcaronBridge
+
+        ports = []
+
+        def factory(device, *args, **kwargs):
+            port = FakeSerial()
+            port.inject(odom_packet(), source=2 if device.endswith("0") else 1)
+            ports.append(port)
+            return port
+
+        candidates = [SimpleNamespace(device=f"/dev/ttyUSB{i}", description="USB")
+                      for i in range(2)]
+        with patch("dcaron_bridge.node.list_ports.comports", return_value=candidates):
+            node = DcaronBridge(
+                serial_factory=factory, context=self.context,
+                parameter_overrides=[Parameter("port", value="auto"),
+                                     Parameter("auto_detect_timeout", value=0.03)])
+            self.nodes.append(node)
+            node.tick()
+        self.assertEqual(node.active_port, "/dev/ttyUSB1")
+        self.assertTrue(ports[0].closed)
+        self.assertIs(node.port, ports[1])
+        self.assertEqual(ports[1].tx, [subscribe("odom"), frame(0x0B, 0x40)])
+
     def setUp(self):
         from rclpy.context import Context
         from rclpy.executors import SingleThreadedExecutor

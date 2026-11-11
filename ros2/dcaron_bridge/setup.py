@@ -5,6 +5,7 @@ setup(
     name="dcaron_bridge",
     version="0.4.1",
     packages=["dcaron_bridge"],
+    package_data={"dcaron_bridge": ["web_panel.html"]},
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/dcaron_bridge"]),
         ("share/dcaron_bridge", ["package.xml"]),
@@ -20,6 +21,8 @@ setup(
     license="Proprietary",
     tests_require=["pytest"],
     entry_points={"console_scripts": ["dcaron_bridge = dcaron_bridge.node:main",
+                                      "dcaron_console = dcaron_bridge.web_console:main",
+                                      "dcaron_console_terminal = dcaron_bridge.console:terminal_main",
                                       "trajectory_sequence = dcaron_bridge.trajectory:main",
                                       "motion_sequence = dcaron_bridge.sequence:main",
                                       "stadium_test = dcaron_bridge.trajectory:stadium_main"]},
